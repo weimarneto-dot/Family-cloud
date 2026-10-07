@@ -1,0 +1,13 @@
+{
+  "name": "family-cloud",
+  "private": true,
+  "description": "Private file storage for the family: files, folders, sharing, trash. The server needs no packages; Playwright is only for the browser test.",
+  "scripts": {
+    "test:server": "python3 test_cloud.py",
+    "test:browser": "node tests/smoke.js",
+    "test": "python3 test_cloud.py && node tests/smoke.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}

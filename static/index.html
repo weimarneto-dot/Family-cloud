@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b6b53">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Family Cloud">
+<title>Family Cloud</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<section id="login" hidden>
+  <form id="login-form" autocomplete="on">
+    <h1>Family Cloud</h1>
+    <label>Username <input name="username" autocomplete="username" autocapitalize="none" autocorrect="off" required></label>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+    <p id="login-error" role="alert"></p>
+    <button type="submit">Sign in</button>
+  </form>
+</section>
+
+<section id="app" hidden>
+  <header id="top">
+    <div class="titles"><strong id="me-name"></strong><small id="storage"></small></div>
+    <span class="spacer"></span>
+    <button id="sign-out" type="button">Sign out</button>
+  </header>
+  <div id="drive-warning" role="alert" hidden>The storage drive is not connected: you can look around, but nothing can be uploaded right now.</div>
+  <nav id="tabs">
+    <button type="button" data-tab="files" class="on">My files</button>
+    <button type="button" data-tab="shared">Shared with me</button>
+    <button type="button" data-tab="trash">Trash</button>
+    <input id="search" type="search" placeholder="Search" aria-label="Search files" autocomplete="off">
+  </nav>
+  <div id="bar">
+    <div id="crumbs" aria-label="Where you are"></div>
+    <span class="spacer"></span>
+    <button id="new-folder" class="icon" type="button">New folder</button>
+    <button id="upload" type="button">Upload</button>
+    <button id="empty-trash" class="icon" type="button" hidden>Empty trash</button>
+    <input id="file" type="file" multiple hidden>
+  </div>
+  <ul id="list" aria-label="Files"></ul>
+  <p id="empty" hidden></p>
+  <div id="uploads" hidden>
+    <div class="head"><strong id="uploads-title">Uploading</strong><span class="spacer"></span><button id="uploads-close" class="icon" type="button">Hide</button></div>
+    <ul id="upload-list"></ul>
+  </div>
+</section>
+
+<div id="sheet" hidden role="dialog" aria-label="Action">
+  <form id="sheet-form"></form>
+</div>
+<div id="viewer" hidden role="dialog" aria-label="Preview">
+  <div class="viewer-bar"><strong id="viewer-name"></strong><span class="spacer"></span><a id="viewer-download" class="btn" download>Download</a><button id="viewer-close" type="button">Close</button></div>
+  <div id="viewer-body"></div>
+</div>
+<div id="toast" role="status" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>
