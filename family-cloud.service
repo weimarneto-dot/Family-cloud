@@ -1,0 +1,18 @@
+[Unit]
+Description=Family Cloud (private file storage for the family)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+# 8766 is Downloader Web, 8777 is Family Chat. The cloud listens on 8778, on this machine only:
+# put HTTPS in front of it (see README.md) instead of exposing the port.
+# Point --data-dir at the big drive and keep --require-mount so nothing lands on the system disk
+# if that drive is not mounted. Edit both lines to match the P50, then reload.
+ExecStart=%h/family-cloud/server.py --data-dir /mnt/BIGDRIVE/family-cloud serve --port 8778 --secure-cookie --require-mount /mnt/BIGDRIVE
+Restart=on-failure
+RestartSec=10
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target
