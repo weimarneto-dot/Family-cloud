@@ -132,7 +132,7 @@ function render() {
   }
   $("crumbs").replaceChildren(...trail);
   const canWrite = !q && state.tab !== "trash" && (state.role === "owner" || state.role === "edit") && !(state.tab === "shared" && state.folder === null);
-  $("new-folder").hidden = $("upload").hidden = !canWrite;
+  $("new-folder").hidden = $("upload").hidden = $("scan-open").hidden = !canWrite;
   $("empty-trash").hidden = !(state.tab === "trash" && !q && state.items.length);
   const rows = state.items.map(row);
   $("list").replaceChildren(...rows);

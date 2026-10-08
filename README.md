@@ -8,7 +8,7 @@ phone's home screen.
 **It does:** logins; folders; upload from phone or computer (big files go in 4 MB pieces and carry
 on after a dropped connection); download; pictures, video, audio and PDFs open in the app (video
 seeks properly); thumbnails (pictures, and video frames when `ffmpeg` is installed); rename, move,
-search by name; **sharing a file or folder with a named person as viewer or editor**; **trash** that
+search by name; **scan documents to PDF** (Scan button: take photos of pages with the phone camera or pick pictures, rotate, clean up, reorder, and save one PDF in the current folder); **sharing a file or folder with a named person as viewer or editor**; **trash** that
 keeps things 30 days; per-person storage limits; a warning when the drive is nearly full.
 
 **It does not do (yet):** sync folders on a computer or WebDAV, automatic photo backup from the phone,
@@ -16,7 +16,7 @@ public links for people without an account, end-to-end encryption (the server ho
 clear — protect the drive), version history, resuming an upload after the page was closed or reloaded
 (pick the file again), or any antivirus scanning.
 
-**Status:** the server (36 tests) and the web app (a two-user browser test on Chromium) pass in the
+**Status:** the server (36 tests) and the web app (a two-user browser test and a scan-to-PDF test on Chromium) pass in the
 build environment. It has **not** been run on the P50, over Tailscale, or on an iPhone yet.
 
 ## Using the P50's resources
@@ -75,4 +75,5 @@ Repeated wrong passwords lock that user/address pair out for a while.
 ```bash
 python3 test_cloud.py                                   # server, 36 tests
 npm install && CHROMIUM=/path/to/chrome node tests/smoke.js   # browser, two users, port 8789
+CHROMIUM=/path/to/chrome node tests/scan.js                   # scan to PDF, port 8790 (needs pdfinfo/pdftoppm)
 ```

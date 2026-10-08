@@ -5,7 +5,8 @@
   "scripts": {
     "test:server": "python3 test_cloud.py",
     "test:browser": "node tests/smoke.js",
-    "test": "python3 test_cloud.py && node tests/smoke.js"
+    "test": "python3 test_cloud.py && node tests/smoke.js && node tests/scan.js",
+    "test:scan": "node tests/scan.js"
   },
   "devDependencies": {
     "playwright": "^1.56.0"

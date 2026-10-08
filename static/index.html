@@ -41,6 +41,7 @@
     <span class="spacer"></span>
     <button id="new-folder" class="icon" type="button">New folder</button>
     <button id="upload" type="button">Upload</button>
+    <button id="scan-open" type="button">Scan</button>
     <button id="empty-trash" class="icon" type="button" hidden>Empty trash</button>
     <input id="file" type="file" multiple hidden>
   </div>
@@ -59,7 +60,27 @@
   <div class="viewer-bar"><strong id="viewer-name"></strong><span class="spacer"></span><a id="viewer-download" class="btn" download>Download</a><button id="viewer-close" type="button">Close</button></div>
   <div id="viewer-body"></div>
 </div>
+<div id="scan" hidden role="dialog" aria-label="Scan documents">
+  <div class="scan-bar"><strong>Scan to PDF</strong><span class="spacer"></span><button id="scan-close" class="icon" type="button">Cancel</button></div>
+  <div class="scan-body">
+    <div class="scan-add">
+      <button id="scan-camera" type="button">Take a photo</button>
+      <button id="scan-library" class="icon" type="button">Choose pictures</button>
+      <label class="check"><input id="scan-clean" type="checkbox" checked> Clean up (document look)</label>
+      <input id="scan-photo" type="file" accept="image/*" capture="environment" hidden>
+      <input id="scan-pick" type="file" accept="image/*" multiple hidden>
+    </div>
+    <p id="scan-empty">Photograph each page flat and well lit, one after another. They are joined into one PDF.</p>
+    <ul id="scan-pages"></ul>
+  </div>
+  <div class="scan-foot">
+    <input id="scan-name" aria-label="File name" autocomplete="off" maxlength="120">
+    <button id="scan-save" type="button" disabled>Save as PDF</button>
+  </div>
+  <p id="scan-error" role="alert"></p>
+</div>
 <div id="toast" role="status" hidden></div>
 <script src="/app.js"></script>
+<script src="/scan.js"></script>
 </body>
 </html>

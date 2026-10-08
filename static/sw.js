@@ -1,8 +1,8 @@
 // Family Cloud service worker: lets the app install and open its shell offline.
 // The network always wins when it answers, so a new version shows up on the next load.
 // Nothing under /api/ (files, thumbnails, uploads) is ever cached here.
-const CACHE = "family-cloud-shell-v1";
-const SHELL = ["/", "/style.css", "/app.js", "/manifest.webmanifest", "/icon.svg"];
+const CACHE = "family-cloud-shell-v2";
+const SHELL = ["/", "/style.css", "/app.js", "/scan.js", "/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
