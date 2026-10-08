@@ -79,6 +79,17 @@
   </div>
   <p id="scan-error" role="alert"></p>
 </div>
+<div id="frame" hidden role="dialog" aria-label="Frame the page">
+  <div class="scan-bar"><strong>Drag the corners onto the paper</strong></div>
+  <div class="frame-body"><canvas id="frame-canvas"></canvas></div>
+  <div class="scan-foot">
+    <button id="frame-auto" class="icon" type="button">Find paper</button>
+    <button id="frame-full" class="icon" type="button">Whole photo</button>
+    <span class="spacer"></span>
+    <button id="frame-cancel" class="icon" type="button">Cancel</button>
+    <button id="frame-ok" type="button">Done</button>
+  </div>
+</div>
 <div id="toast" role="status" hidden></div>
 <script src="/app.js"></script>
 <script src="/scan.js"></script>

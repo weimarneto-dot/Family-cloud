@@ -21,7 +21,7 @@ const base = `http://127.0.0.1:${PORT}/`;
 const failures = [];
 const check = (ok, what) => { if (!ok) failures.push(what); console.log((ok ? "ok   " : "FAIL ") + what); };
 
-function makePng(w, h) {
+function makePng(w, h, rgb) {
   const zlib = require("zlib");
   const table = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
   const crc = (buf) => { let c = 0xFFFFFFFF; for (const byte of buf) c = table[(c ^ byte) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
@@ -33,10 +33,12 @@ function makePng(w, h) {
   };
   const head = Buffer.alloc(13); head.writeUInt32BE(w, 0); head.writeUInt32BE(h, 4); head[8] = 8; head[9] = 2;
   const rows = [];
-  for (let y = 0; y < h; y++) { const row = Buffer.alloc(1 + w * 3); for (let x = 0; x < w; x++) { row[1 + x * 3] = x % 256; row[2 + x * 3] = y % 256; row[3 + x * 3] = 120; } rows.push(row); }
+  for (let y = 0; y < h; y++) { const row = Buffer.alloc(1 + w * 3); for (let x = 0; x < w; x++) { if (rgb) rgb.copy(row, 1 + x * 3, (y * w + x) * 3, (y * w + x) * 3 + 3); else { row[1 + x * 3] = x % 256; row[2 + x * 3] = y % 256; row[3 + x * 3] = 120; } } rows.push(row); }
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]), chunk("IHDR", head), chunk("IDAT", zlib.deflateSync(Buffer.concat(rows))), chunk("IEND", Buffer.alloc(0))]);
 }
 const PNG = makePng(240, 160);
+const { paperPhoto, QUAD } = require("./paper.js");
+const PHOTO = makePng(600, 800, paperPhoto(600, 800, QUAD));
 const pattern = (n) => Buffer.from(Uint8Array.from({ length: n }, (_, i) => (i * 31 + (i >> 8)) % 251));    // position-dependent, so a lost or repeated chunk shows up
 
 function addUser(name, display, extra = []) {
@@ -88,6 +90,30 @@ function addUser(name, display, extra = []) {
     check(info.status === 0 && /Pages:\s+2/.test(info.stdout), "pdfinfo reads a 2-page PDF: " + (info.stdout || info.stderr).split("\n").filter((l) => /Pages|Page size|Producer|Error/.test(l)).join(" | "));
     const ppm = spawnSync("pdftoppm", ["-r", "20", "-png", file, path.join(DATA, "pg")]);
     check(ppm.status === 0 && fs.existsSync(path.join(DATA, "pg-2.png")), "both pages render");
+    // A photo of paper on a table: the scanner should cut the table away and straighten the page.
+    await page.click("#scan-open");
+    await page.setInputFiles("#scan-pick", { name: "paper.png", mimeType: "image/png", buffer: PHOTO });
+    await page.waitForFunction(() => document.querySelectorAll("#scan-pages li").length === 1);
+    await page.locator("#scan-pages li button", { hasText: "Original colours" }).click();      // colours back on, so the table would show
+    await page.locator("#scan-pages li button", { hasText: "Frame" }).click();
+    check(await page.isVisible("#frame-canvas"), "the frame editor opens");
+    await page.click("#frame-ok");
+    await page.fill("#scan-name", "Paper");
+    await page.click("#scan-save");
+    await page.waitForFunction(() => [...document.querySelectorAll("#list li")].some((li) => li.textContent.includes("Paper.pdf")));
+    await page.locator("#list li", { hasText: "Paper.pdf" }).locator("button.more").click();
+    const [dl2] = await Promise.all([page.waitForEvent("download"), page.locator("#sheet-form .actions button", { hasText: /^Download$/ }).click()]);
+    const file2 = path.join(DATA, "paper.pdf");
+    await dl2.saveAs(file2);
+    spawnSync("pdftoppm", ["-r", "30", file2, path.join(DATA, "paper")]);       // a PPM picture
+    const ppm2 = fs.readFileSync(path.join(DATA, "paper-1.ppm"));
+    const [pw, ph] = ppm2.toString("latin1", 0, 30).split(/\s+/).slice(1, 3).map(Number);
+    const pix = ppm2.subarray(ppm2.length - pw * ph * 3);
+    const lum = (x, y) => pix[(y * pw + x) * 3];
+    const edge = [[2, 2], [pw - 3, 2], [pw - 3, ph - 3], [2, ph - 3]].map(([x, y]) => lum(x, y));
+    check(edge.every((v) => v > 180), "the saved page has paper in all four corners, not the table (" + edge.join(",") + ")");
+    check(Math.abs(pw / ph - 0.72) < 0.15, "the page has a paper-like shape, " + pw + " x " + ph);
+
     check(errors.length === 0, "no page errors" + (errors.length ? ": " + errors.join("; ") : ""));
   } catch (e) {
     failures.push("crashed: " + e.message);
