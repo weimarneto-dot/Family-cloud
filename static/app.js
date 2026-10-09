@@ -1,5 +1,5 @@
 "use strict";
-// Family Cloud web app. File and folder names from other people are put on the page with textContent or
+// fMily Cloud web app. File and folder names from other people are put on the page with textContent or
 // append(string), never as HTML.
 const $ = (id) => document.getElementById(id);
 const state = { me: null, tab: "files", folder: null, path: [], role: "owner", items: [], rootView: true };

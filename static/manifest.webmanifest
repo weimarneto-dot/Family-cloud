@@ -1,6 +1,6 @@
 {
-  "name": "Family Cloud",
-  "short_name": "Family Cloud",
+  "name": "fMily Cloud",
+  "short_name": "fMily Cloud",
   "description": "Private file storage for the family, running on the home server.",
   "start_url": "/",
   "scope": "/",
