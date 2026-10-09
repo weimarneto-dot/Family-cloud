@@ -268,7 +268,7 @@ class Store:
         own = c is None
         c = c or self.conn()
         try:
-            return c.execute("SELECT COALESCE(SUM(size), 0) FROM items WHERE owner_id=? AND kind='file'", (owner_id,)).fetchone()[0]
+            return c.execute("SELECT COALESCE(SUM(size), 0) FROM items WHERE owner_id=? AND kind='file' AND COALESCE(blob,'') NOT LIKE 'dl%'", (owner_id,)).fetchone()[0]
         finally:
             if own:
                 c.close()
@@ -1005,12 +1005,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
 
-def make_server(host, port, data_dir, secure_cookie=False, static_dir=None, require_mount=None, sso_upstream=None):
+def make_server(host, port, data_dir, secure_cookie=False, static_dir=None, require_mount=None, sso_upstream=None, dw_users=None, dw_files=None):
     handler = type("BoundHandler", (Handler,), {
         "store": Store(data_dir, require_mount), "limiter": LoginLimiter(), "secure_cookie": secure_cookie, "sso": sso_mod.Sso(sso_upstream) if sso_upstream else None,
         "static_dir": Path(static_dir) if static_dir else HERE / "static"})
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
+    if dw_users and dw_files:                       # what a person's Downloader and Uploader made shows in their own Cloud (see downloads.py)
+        import downloads
+        downloads.start(handler.store, Path(dw_users), Path(dw_files))
     return httpd
 
 
@@ -1034,6 +1037,8 @@ def main(argv=None):
     s.add_argument("--port", type=int, default=8778)
     s.add_argument("--sso", default="", metavar="URL", help="Downloader Web address (e.g. http://127.0.0.1:8766): its accounts sign in here too, one login for every family app")
     s.add_argument("--secure-cookie", action="store_true", help="mark the session cookie Secure (use behind HTTPS)")
+    s.add_argument("--dw-users", default="", metavar="FILE", help="Downloader Web's users.json: with --dw-files, each person's Downloader/Uploader files appear in their own Cloud, in a folder called Downloads")
+    s.add_argument("--dw-files", default="", metavar="DIR", help="Downloader Web's user folders (default there: ~/DownloaderUsers)")
     s.add_argument("--require-mount", default="", help="refuse uploads unless this directory is a mount point (the big drive)")
     a = sub.add_parser("add-user")
     a.add_argument("username")
@@ -1055,7 +1060,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         if args.cmd == "serve":
-            httpd = make_server(args.host, args.port, args.data_dir, args.secure_cookie, require_mount=args.require_mount or None, sso_upstream=args.sso or None)
+            httpd = make_server(args.host, args.port, args.data_dir, args.secure_cookie, require_mount=args.require_mount or None, sso_upstream=args.sso or None, dw_users=args.dw_users or None, dw_files=args.dw_files or None)
             print(f"fMily Cloud on http://{args.host}:{args.port}/  (data {args.data_dir}"
                   f"{', needs ' + args.require_mount + ' mounted' if args.require_mount else ''})", file=sys.stderr)
             try:

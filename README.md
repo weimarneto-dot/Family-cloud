@@ -34,6 +34,15 @@ without asking again. Cloud only asks Downloader Web who the cookie belongs to; 
 - Requests from the public internet (Tailscale Funnel) cannot sign in with a family password; local accounts still work.
 - Without `--sso` nothing changes. `python3 test_sso.py` tests it against a stand-in Downloader Web.
 
+## What the Downloader and Uploader make appears in your Cloud
+
+Start the server with `--dw-users ~/.local/share/downloader/web/users.json --dw-files ~/DownloaderUsers` (Downloader Web's accounts file and the folder of each person's
+"User files"). Every minute each person's own Downloader/Uploader folder is shown in **their** Cloud as a folder called **Downloads**, with the same sub-folders (Music, Videos ...).
+Nothing is copied: each entry is a link to the real file, so a big video takes no second copy on the drive and does not count toward the quota. New files appear, finished
+downloads only (half-finished `.part` files are left out), files that were removed disappear, and removing an entry in Cloud removes only the link, never the original
+(it comes back at the next minute while the original still exists). Each person is matched by their Downloader Web e-mail, so only their own files go into their own Cloud.
+(`python3 test_downloads.py`.)
+
 ## Using the P50's resources
 
 - **Disk:** `--data-dir` can be on any drive; files live in `blobs/` under it by id, so renaming never
