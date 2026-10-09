@@ -19,6 +19,21 @@ clear — protect the drive), version history, resuming an upload after the page
 **Status:** the server (36 tests) and the web app (a two-user browser test on Chromium) pass in the
 build environment. It has **not** been run on the P50, over Tailscale, or on an iPhone yet.
 
+## One login for every family app (single sign-on)
+
+Start the server with `--sso http://127.0.0.1:8766` (Downloader Web's address) and Downloader Web's accounts sign in
+here too. A person who is signed in to Downloader Web, Player, Song Studio, Chat or any other app that uses this
+already carries the `dlw_session` cookie (cookies are shared by every port of the same host name), so Cloud opens
+without asking again. Cloud only asks Downloader Web who the cookie belongs to; passwords are checked there alone.
+
+- Typing an **e-mail address** in the login box signs in with the family login; a plain username still uses the local account.
+- The first visit creates a user from the e-mail (`anna@example.org` becomes `anna`, or `anna2` if `anna` exists), named as in
+  Downloader Web. It never takes over an existing user. To make an existing user (and their data) belong to an address:
+  `python3 server.py link-user anna anna@example.org`.
+- Signing out signs out of every family app.
+- Requests from the public internet (Tailscale Funnel) cannot sign in with a family password; local accounts still work.
+- Without `--sso` nothing changes. `python3 test_sso.py` tests it against a stand-in Downloader Web.
+
 ## Using the P50's resources
 
 - **Disk:** `--data-dir` can be on any drive; files live in `blobs/` under it by id, so renaming never

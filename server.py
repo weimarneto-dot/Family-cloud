@@ -40,6 +40,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+import sso as sso_mod
+
 HERE = Path(__file__).resolve().parent
 DEFAULT_DATA = Path(os.environ.get("FAMILY_CLOUD_DATA", Path.home() / ".local" / "share" / "family-cloud"))
 COOKIE = "cloud_session"
@@ -147,6 +149,9 @@ class Store:
         with closing(self.conn()) as c, c:
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript(SCHEMA)
+            if "sso_email" not in [r[1] for r in c.execute("PRAGMA table_info(users)")]:
+                c.execute("ALTER TABLE users ADD COLUMN sso_email TEXT")    # the Downloader Web account this user is (single sign-on)
+            c.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_sso_email ON users(sso_email) WHERE sso_email IS NOT NULL")
         self.purge_trash()
         self.purge_stale_uploads()
 
@@ -216,6 +221,35 @@ class Store:
             with self.write_lock, closing(self.conn()) as c, c:
                 c.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (time.time(), h))
         return dict(row) if row else None
+
+    # single sign-on: the user that belongs to a Downloader Web account (made on first visit)
+    def sso_user(self, who):
+        email = who["email"]
+        with closing(self.conn()) as c:
+            row = c.execute("SELECT id, username, display_name, quota_bytes, disabled FROM users WHERE sso_email=?", (email,)).fetchone()
+        if row is None:
+            with self.write_lock, closing(self.conn()) as c, c:
+                row = c.execute("SELECT id, username, display_name, quota_bytes, disabled FROM users WHERE sso_email=?", (email,)).fetchone()
+                if row is None:
+                    taken = lambda n: c.execute("SELECT 1 FROM users WHERE username=?", (n,)).fetchone() is not None   # noqa: E731
+                    username = sso_mod.username_from_email(email, taken)
+                    name = (who.get("name") or "").strip() or username
+                    c.execute("INSERT INTO users(username, display_name, pw_hash, created, sso_email) VALUES(?,?,?,?,?)",
+                              (username, name, "!", time.time(), email))      # "!" = no local password
+                    row = c.execute("SELECT id, username, display_name, quota_bytes, disabled FROM users WHERE sso_email=?", (email,)).fetchone()
+        if row["disabled"]:
+            return None
+        return {"id": row["id"], "username": row["username"], "display_name": row["display_name"], "quota_bytes": row["quota_bytes"], "last_seen": time.time()}
+
+    def link_sso(self, username, email):
+        """Make an existing user the owner of a Downloader Web e-mail address, so that account signs in to this user."""
+        with self.write_lock, closing(self.conn()) as c, c:
+            try:
+                cur = c.execute("UPDATE users SET sso_email=? WHERE username=?", (email.strip().lower(), username))
+            except sqlite3.IntegrityError:
+                raise ValueError("that e-mail address already belongs to another user") from None
+            if not cur.rowcount:
+                raise ValueError(f"no user {username!r}")
 
     def end_session(self, token):
         with self.write_lock, closing(self.conn()) as c, c:
@@ -660,6 +694,7 @@ class Handler(BaseHTTPRequestHandler):
     limiter = None
     static_dir = HERE / "static"
     secure_cookie = False
+    sso = None                 # sso_mod.Sso when Downloader Web accounts may sign in
     server_version = "FamilyCloud"
 
     def log_message(self, fmt, *args):
@@ -708,8 +743,25 @@ class Handler(BaseHTTPRequestHandler):
         origin = self.headers.get("Origin")
         return not origin or urlparse(origin).netloc == self.headers.get("Host", "")
 
-    def user_or_401(self):
+    def dlw_token(self):
+        return sso_mod.cookie_value(self.headers.get("Cookie", ""), sso_mod.DW_COOKIE)
+
+    def current_user(self):
+        """This app's own session first; else a Downloader Web session (single sign-on)."""
         user = self.store.session_user(self.token())
+        if user or self.sso is None:
+            return user
+        who = self.sso.whoami(self.dlw_token())
+        return self.store.sso_user(who) if who else None
+
+    def dlw_cookie_header(self, value, max_age):
+        parts = [f"{sso_mod.DW_COOKIE}={value}", "Path=/", "HttpOnly", "SameSite=Lax", f"Max-Age={max_age}"]
+        if self.secure_cookie or self.headers.get("X-Forwarded-Proto") == "https":
+            parts.append("Secure")
+        return ("Set-Cookie", "; ".join(parts))
+
+    def user_or_401(self):
+        user = self.current_user()
         if not user:
             self.fail(401, "not signed in")
         return user
@@ -801,8 +853,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         s, uid = self.store, user["id"]
         if path == "/api/logout":
-            s.end_session(self.token())
-            return self.send_json({"ok": True}, headers=[self.cookie_header("", 0)])
+            if self.token():
+                s.end_session(self.token())
+            headers = [self.cookie_header("", 0)]
+            if self.sso is not None and self.dlw_token():
+                self.sso.logout(self.dlw_token())       # one sign-out for every family app
+                headers.append(self.dlw_cookie_header("", 0))
+            return self.send_json({"ok": True}, headers=headers)
         if path == "/api/folder":
             return self.send_json(s.create_folder(uid, self.opt_int(body.get("parent")), body.get("name")), 201)
         if path == "/api/rename":
@@ -848,6 +905,21 @@ class Handler(BaseHTTPRequestHandler):
         key = f"{self.client_address[0]}|{username}"
         if self.limiter.blocked(key):
             return self.fail(429, "too many attempts; wait a few minutes")
+        if self.sso is not None and "@" in username:
+            # the family login (a Downloader Web account). Never from the public internet: Funnel visitors use a local account.
+            if sso_mod.is_funnel(self.headers):
+                return self.fail(403, "sign in with your local username here")
+            token, age = self.sso.login(username, str(body.get("password", "")))
+            who = self.sso.whoami(token) if token else None
+            if not who:
+                self.limiter.fail(key)
+                return self.fail(401, "wrong e-mail or password")
+            self.limiter.clear(key)
+            user = self.store.sso_user(who)
+            if not user:
+                return self.fail(403, "this account is disabled here")
+            return self.send_json({"id": user["id"], "username": user["username"], "display_name": user["display_name"]},
+                                  headers=[self.dlw_cookie_header(token, age)])
         row = self.store.login(username, str(body.get("password", "")))
         if not row:
             self.limiter.fail(key)
@@ -923,9 +995,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
 
-def make_server(host, port, data_dir, secure_cookie=False, static_dir=None, require_mount=None):
+def make_server(host, port, data_dir, secure_cookie=False, static_dir=None, require_mount=None, sso_upstream=None):
     handler = type("BoundHandler", (Handler,), {
-        "store": Store(data_dir, require_mount), "limiter": LoginLimiter(), "secure_cookie": secure_cookie,
+        "store": Store(data_dir, require_mount), "limiter": LoginLimiter(), "secure_cookie": secure_cookie, "sso": sso_mod.Sso(sso_upstream) if sso_upstream else None,
         "static_dir": Path(static_dir) if static_dir else HERE / "static"})
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
@@ -950,6 +1022,7 @@ def main(argv=None):
     s = sub.add_parser("serve")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8778)
+    s.add_argument("--sso", default="", metavar="URL", help="Downloader Web address (e.g. http://127.0.0.1:8766): its accounts sign in here too, one login for every family app")
     s.add_argument("--secure-cookie", action="store_true", help="mark the session cookie Secure (use behind HTTPS)")
     s.add_argument("--require-mount", default="", help="refuse uploads unless this directory is a mount point (the big drive)")
     a = sub.add_parser("add-user")
@@ -960,6 +1033,9 @@ def main(argv=None):
     r = sub.add_parser("reset-password")
     r.add_argument("username")
     r.add_argument("--password-stdin", action="store_true")
+    k = sub.add_parser("link-user", help="make an existing user the owner of a Downloader Web e-mail address (single sign-on)")
+    k.add_argument("username")
+    k.add_argument("email")
     d = sub.add_parser("disable-user")
     d.add_argument("username")
     q = sub.add_parser("set-quota")
@@ -969,7 +1045,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         if args.cmd == "serve":
-            httpd = make_server(args.host, args.port, args.data_dir, args.secure_cookie, require_mount=args.require_mount or None)
+            httpd = make_server(args.host, args.port, args.data_dir, args.secure_cookie, require_mount=args.require_mount or None, sso_upstream=args.sso or None)
             print(f"Family Cloud on http://{args.host}:{args.port}/  (data {args.data_dir}"
                   f"{', needs ' + args.require_mount + ' mounted' if args.require_mount else ''})", file=sys.stderr)
             try:
@@ -984,6 +1060,9 @@ def main(argv=None):
         elif args.cmd == "reset-password":
             store.set_password(args.username.strip().lower(), prompt_password(args))
             print("password changed; the user's sessions were ended")
+        elif args.cmd == "link-user":
+            store.link_sso(args.username.strip().lower(), args.email)
+            print(f"{args.username} is now the family login of {args.email.strip().lower()}")
         elif args.cmd == "disable-user":
             store.disable_user(args.username.strip().lower())
             print("disabled; the user's sessions were ended")
