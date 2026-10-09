@@ -760,6 +760,8 @@ class Handler(BaseHTTPRequestHandler):
         if user or self.sso is None:
             return user
         who = self.sso.whoami(self.dlw_token())
+        if who and not sso_mod.allows(who, "cloud"):
+            return None                                     # the account was not given this app: treated as not signed in here
         return self.store.sso_user(who) if who else None
 
     def dlw_cookie_header(self, value, max_age):

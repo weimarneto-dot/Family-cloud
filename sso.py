@@ -68,7 +68,10 @@ class Sso:
             if hit and hit[0] > now:
                 return hit[1]
         status, data, _ = self._request("GET", "/api/me", token)
-        who = {"email": str(data["email"]).strip().lower(), "name": str(data.get("name") or ""), "admin": bool(data.get("admin"))} \
+        acc = data.get("access") if isinstance(data.get("access"), dict) else {}
+        apps = acc.get("apps")
+        who = {"email": str(data["email"]).strip().lower(), "name": str(data.get("name") or ""), "admin": bool(data.get("admin")),
+               "apps": [str(a) for a in apps] if isinstance(apps, list) else None} \
             if status == 200 and data.get("email") else None
         with self._lock:
             if len(self._cache) > 500:
@@ -105,3 +108,9 @@ def cookie_value(cookie_header: str, name: str) -> "str | None":
 def is_funnel(headers) -> bool:
     """Tailscale Funnel marks requests that come from the public internet with this header."""
     return bool(headers.get("Tailscale-Funnel-Request"))
+
+
+def allows(who, app_id: str) -> bool:
+    """False when the account was not given this app (the admin chooses on the People page of fMily Home); the admin account itself is always let in."""
+    apps = who.get("apps")
+    return bool(who.get("admin")) or apps is None or app_id in apps
