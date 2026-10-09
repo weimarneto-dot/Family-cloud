@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cloud: single sign-on through a (fake) Downloader Web.
+"""fMily Cloud: single sign-on through a (fake) Downloader Web.
 
   python3 test_sso.py
 """

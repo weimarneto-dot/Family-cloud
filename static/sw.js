@@ -1,4 +1,4 @@
-// Cloud service worker: lets the app install and open its shell offline.
+// fMily Cloud service worker: lets the app install and open its shell offline.
 // The network always wins when it answers, so a new version shows up on the next load.
 // Nothing under /api/ (files, thumbnails, uploads) is ever cached here.
 const CACHE = "family-cloud-shell-v1";

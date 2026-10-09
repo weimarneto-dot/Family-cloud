@@ -5,7 +5,7 @@ a person signed in to DW (or to any app that uses this module) already carries i
 then asks DW `GET /api/me` with that cookie and maps the answer (an e-mail address) to its own user row. Passwords are
 only ever checked by DW; this app never stores or sees the DW password beyond forwarding it once, on sign-in.
 
-Standard library only. The same file is used by Chat, Cloud and Maps.
+Standard library only. The same file is used by fMily Chat, fMily Cloud and fMily Maps.
 """
 from __future__ import annotations
 
