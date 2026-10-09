@@ -42,6 +42,14 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import sso as sso_mod
 
+
+def frame_ancestors(host_header):
+    """Who may show this app in a frame: fMily Home, which is another port of this same machine (nobody else)."""
+    host = (host_header or "").rsplit(":", 1)[0].strip("[]").lower()
+    if host and re.fullmatch(r"[a-z0-9.-]{1,253}", host):
+        return f"frame-ancestors https://{host}:* http://{host}:*"
+    return "frame-ancestors 'none'"
+
 HERE = Path(__file__).resolve().parent
 DEFAULT_DATA = Path(os.environ.get("FAMILY_CLOUD_DATA", Path.home() / ".local" / "share" / "family-cloud"))
 COOKIE = "cloud_session"
@@ -990,7 +998,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; frame-src 'self'; connect-src 'self'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; frame-src 'self'; connect-src 'self'; " + frame_ancestors(self.headers.get("Host")))
         self.end_headers()
         self.wfile.write(raw)
 
