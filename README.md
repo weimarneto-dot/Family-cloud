@@ -1,7 +1,7 @@
-# fMily Cloud
+# Cloud
 
 A private file cloud for the family — a small Google Drive / iCloud Drive — running on the home
-server (the P50) and reached over Tailscale. Same design and same building blocks as fMily Chat:
+server (the P50) and reached over Tailscale. Same design and same building blocks as Chat:
 Python standard library only, one SQLite database, accounts you create yourself, installable on the
 phone's home screen.
 

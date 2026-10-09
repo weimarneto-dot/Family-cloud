@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""fMily Cloud: private file storage for the family, like Google Drive or iCloud, on the home server.
+"""Cloud: private file storage for the family, like Google Drive or iCloud, on the home server.
 Standard library only (ffmpeg, if installed, makes thumbnails).
 
 Everyone has their own files and folders behind a login, can share a file or folder with another family
 member (view or edit), and gets a trash that keeps deleted things for 30 days. Uploads are chunked and can
 resume after the phone loses its connection; downloads support byte ranges, so video plays and seeks.
-The web app in static/ is an installable PWA with the same look as fMily Chat.
+The web app in static/ is an installable PWA with the same look as Chat.
 
   python3 server.py add-user anna --name "Anna" [--quota-gb 200]     # asks for a password; no quota = the drive's limit
   python3 server.py list-users | reset-password anna | disable-user anna | set-quota anna 200 (0 = no limit)
@@ -90,7 +90,7 @@ class ApiError(Exception):
         self.status, self.message, self.extra = status, message, extra
 
 
-# ---- passwords (same scheme as fMily Chat) ------------------------------------------------
+# ---- passwords (same scheme as Chat) ------------------------------------------------
 
 def hash_password(password, salt=None, n=2 ** 14, r=8, p=1):
     salt = salt or secrets.token_bytes(16)
@@ -1016,7 +1016,7 @@ def prompt_password(args):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="fMily Cloud server")
+    ap = argparse.ArgumentParser(description="Cloud server")
     ap.add_argument("--data-dir", default=str(DEFAULT_DATA), help="where files and the database live (default %(default)s)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("serve")
@@ -1046,7 +1046,7 @@ def main(argv=None):
     try:
         if args.cmd == "serve":
             httpd = make_server(args.host, args.port, args.data_dir, args.secure_cookie, require_mount=args.require_mount or None, sso_upstream=args.sso or None)
-            print(f"fMily Cloud on http://{args.host}:{args.port}/  (data {args.data_dir}"
+            print(f"Cloud on http://{args.host}:{args.port}/  (data {args.data_dir}"
                   f"{', needs ' + args.require_mount + ' mounted' if args.require_mount else ''})", file=sys.stderr)
             try:
                 httpd.serve_forever()

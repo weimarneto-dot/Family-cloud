@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""fMily Cloud server: logins, files and folders, chunked uploads, downloads, sharing, trash, limits.
+"""Cloud server: logins, files and folders, chunked uploads, downloads, sharing, trash, limits.
 
   python3 test_cloud.py
 """

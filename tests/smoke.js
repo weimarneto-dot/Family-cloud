@@ -1,4 +1,4 @@
-// fMily Cloud in a real browser: two people on two "phones" use it the way a family would.
+// Cloud in a real browser: two people on two "phones" use it the way a family would.
 //
 //   npm install            # once, in the repository root: Playwright
 //   node tests/smoke.js    # PORT=8789, CHROMIUM=/path/to/chrome
