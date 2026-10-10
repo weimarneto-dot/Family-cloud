@@ -14,7 +14,7 @@ from pathlib import Path
 
 import server as app
 
-PEOPLE = {"anna@example.org": ("pw-anna-1234", "Anna Silva", True), "bob@example.org": ("pw-bob-1234", "Bob", False)}
+PEOPLE = {"anna@example.org": ("pw-anna-1234", "Anna Silva", True), "bob@example.org": ("pw-bob-1234", "Bob", False), "faye@example.org": ("pw-faye-1234", "Faye Costa", False)}
 
 
 class FakeDW(BaseHTTPRequestHandler):
@@ -46,6 +46,8 @@ class FakeDW(BaseHTTPRequestHandler):
         if self.path == "/api/me" and email:
             pw, name, admin = PEOPLE[email]
             return self._json({"email": email, "name": name, "admin": admin})
+        if self.path == "/api/people" and email:                       # the family's directory: names and addresses of every account but the asker's
+            return self._json([{"email": e, "name": v[1], "username": e.split("@")[0]} for e, v in PEOPLE.items() if e != email])
         self._json({"error": "sign in"}, 401)
 
     def do_POST(self):
@@ -119,6 +121,44 @@ class SsoCase(unittest.TestCase):
         self.assertEqual((status, me["username"]), (200, "bob"))
         again = call(self.port, "GET", "/api/me", cookie=f"dlw_session={token}")[1]
         self.assertEqual(again["id"], me["id"])                 # the same user row, not a new one each time
+
+    def test_3b_somebody_who_never_opened_cloud_can_still_be_given_a_file(self):
+        # Faye is in the family (Downloader Web) but has never opened Cloud: she has no Cloud user yet. Anna, who is signed in, must still see her to share with.
+        anna = call(self.port, "POST", "/api/login", {"username": "anna@example.org", "password": "pw-anna-1234"})[2].split(";")[0]
+        self.assertFalse([u for u in self.store.list_users() if u["username"] == "faye"])
+        status, people, _ = call(self.port, "GET", "/api/users", cookie=anna)
+        self.assertEqual(status, 200)
+        names = {p["display_name"] for p in people}
+        self.assertIn("Faye", {n.split()[0] for n in names})                                     # listed before she ever signed in here
+        self.assertNotIn("Anna Silva", names)                                                      # never the asker
+        faye = next(p for p in people if p["display_name"].startswith("Faye"))
+        status, folder, _ = call(self.port, "POST", "/api/folder", {"parent": None, "name": "Holiday"}, cookie=anna)
+        self.assertEqual(status, 201 if status == 201 else 200)
+        status, _, _ = call(self.port, "POST", "/api/share", {"id": folder["id"], "user": faye["id"], "role": "view"}, cookie=anna)
+        self.assertEqual(status, 200)                                                              # and the share works
+        # when Faye does open Cloud she is the same user row, and the folder is shared with her
+        token = secrets.token_urlsafe(24)
+        FakeDW.sessions[token] = "faye@example.org"
+        me = call(self.port, "GET", "/api/me", cookie=f"dlw_session={token}")[1]
+        self.assertEqual(me["id"], faye["id"])
+        shared = call(self.port, "GET", "/api/shared", cookie=f"dlw_session={token}")[1]
+        self.assertIn("Holiday", [i["name"] for i in shared])
+
+    def test_3c_an_older_downloader_web_without_a_directory_still_lists_who_has_signed_in(self):
+        token = secrets.token_urlsafe(24)
+        FakeDW.sessions[token] = "bob@example.org"
+        FakeDW_people_off = FakeDW.do_GET
+        try:
+            def no_people(handler):
+                if handler.path == "/api/people":
+                    return handler._json({}, 404)
+                return FakeDW_people_off(handler)
+            FakeDW.do_GET = no_people
+            status, people, _ = call(self.port, "GET", "/api/users", cookie=f"dlw_session={token}")
+        finally:
+            FakeDW.do_GET = FakeDW_people_off
+        self.assertEqual(status, 200)
+        self.assertIsInstance(people, list)
 
     def test_4_wrong_password(self):
         status, data, cookie = call(self.port, "POST", "/api/login", {"username": "anna@example.org", "password": "nope"})

@@ -231,6 +231,11 @@ class Store:
         return dict(row) if row else None
 
     # single sign-on: the user that belongs to a Downloader Web account (made on first visit)
+    def ensure_sso_users(self, people):
+        """A Cloud user for every account of the family, made before they ever open Cloud, so anybody can be given a file or a folder."""
+        for p in people:
+            self.sso_user({"email": str(p["email"]).strip().lower(), "name": str(p.get("name") or "")})
+
     def sso_user(self, who):
         email = who["email"]
         with closing(self.conn()) as c:
@@ -835,6 +840,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/me":
             return self.send_json(s.me(user))
         if path == "/api/users":
+            if self.sso is not None:
+                s.ensure_sso_users(self.sso.directory(self.dlw_token()))          # everybody in the family, not only who has already opened Cloud
             return self.send_json([{"id": u["id"], "display_name": u["display_name"]} for u in s.list_users() if u["id"] != user["id"]])
         if path == "/api/folder":
             return self.send_json(s.folder(user["id"], self.opt_int(q.get("id"))))

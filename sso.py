@@ -80,6 +80,13 @@ class Sso:
             self._cache[key] = (now + (self.ttl if who else min(self.ttl, 5.0)), who)
         return who
 
+    def directory(self, token: "str | None") -> list:
+        """[{"email", "name"}] of the family's accounts, from Downloader Web, for the person with this session (empty when it does not answer: an older Downloader Web)."""
+        if not token:
+            return []
+        status, data, _ = self._request("GET", "/api/people", token)
+        return [p for p in data if isinstance(p, dict) and p.get("email")] if status == 200 and isinstance(data, list) else []
+
     def login(self, email: str, password: str) -> "tuple[str, int] | tuple[None, int]":
         """(session token, DW's max-age) when DW accepts the e-mail and password, else (None, status)."""
         status, _, headers = self._request("POST", "/api/login", None, {"email": email, "password": password})
