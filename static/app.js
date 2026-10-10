@@ -176,8 +176,13 @@ $("search").addEventListener("input", () => { clearTimeout(searchTimer); searchT
 
 // ---- viewer --------------------------------------------------------------------------------
 
+const framed = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+// Inside fMily Play, sound and video play in Play's own player (Explorer holds the same file under the key c:<id as 12 hex digits>).
 function viewer(item) {
   const src = "/api/file/" + item.id;
+  if (framed && /^(audio|video)\//.test(item.mime) && Number.isInteger(+item.id)) {
+    try { window.parent.postMessage({ fmily: "play", key: "c:" + (+item.id).toString(16).padStart(12, "0") }, "*"); return; } catch (e) { /* no parent: fall through to the built-in viewer */ }
+  }
   let body;
   if (item.mime.startsWith("image/")) body = el("img", { src, alt: item.name });
   else if (item.mime.startsWith("video/")) body = el("video", { src, controls: true, autoplay: true, playsinline: true });
