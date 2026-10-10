@@ -85,3 +85,12 @@ input, select { font: inherit; font-size: 16px; color: var(--ink); background: v
 
 .fm-logo{height:22px;width:auto;vertical-align:middle;margin-right:6px;flex:none}
 h1 .fm-logo{height:30px}
+
+/* a phone: every button, tab and choice is at least 44px tall (a thumb, not a mouse) */
+@media (pointer: coarse) {
+  button, .btn { min-height: 44px; }
+  #tabs button { min-height: 44px; padding: 8px 14px; }
+  #list .more { min-width: 44px; }
+  #sheet-form select, #sheet-form input { min-height: 44px; }
+  #sheet-form .person { min-height: 48px; }
+}
