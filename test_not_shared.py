@@ -15,6 +15,7 @@ from pathlib import Path
 
 import server as app
 
+CSRF = "family-cloud"
 MESSAGE = "Your account does not include fMily Cloud. Ask the family admin to tick it for you under People."
 PEOPLE = {   # email: (password, name, admin, apps the account was given: None = all)
     "anna@example.org": ("pw-anna-1234", "Anna", True, None),
@@ -82,6 +83,15 @@ def get(port, path, cookie=None):
     return r.status, raw
 
 
+def post(port, path, cookie, csrf, body=None):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("POST", path, json.dumps(body or {}), {"Cookie": cookie, "X-Requested-With": csrf, "Content-Type": "application/json"})
+    r = c.getresponse()
+    raw = r.read()
+    c.close()
+    return r.status, raw
+
+
 class NotShared(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -121,6 +131,14 @@ class NotShared(unittest.TestCase):
 
     def test_the_admin_is_always_let_in(self):
         self.assertEqual(get(self.port, self.PATH, sign_in("anna@example.org"))[0], 200)
+
+    def test_sign_out_works_for_the_person_who_was_not_given_the_app(self):
+        """The message page offers Sign out: it must really sign the person out of the family login (one sign-out for every app), not answer 403 again."""
+        cookie = sign_in("ben@example.org")
+        status, raw = post(self.port, "/api/logout", cookie, CSRF)
+        self.assertEqual(status, 200, raw)
+        self.assertNotIn(cookie.split("=", 1)[1], FakeDW.sessions)
+        self.assertEqual(get(self.port, self.PATH, cookie)[0], 401)
 
 
 if __name__ == "__main__":

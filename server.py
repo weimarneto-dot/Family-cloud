@@ -876,18 +876,18 @@ class Handler(BaseHTTPRequestHandler):
     def api_post(self, path, body):
         if path == "/api/login":
             return self.login(body)
-        user = self.user_or_401()
-        if not user:
-            return
-        s, uid = self.store, user["id"]
-        if path == "/api/logout":
+        if path == "/api/logout":                       # before the sign-in check: a person who was not given this app can still sign out
             if self.token():
-                s.end_session(self.token())
+                self.store.end_session(self.token())
             headers = [self.cookie_header("", 0)]
             if self.sso is not None and self.dlw_token():
                 self.sso.logout(self.dlw_token())       # one sign-out for every family app
                 headers.append(self.dlw_cookie_header("", 0))
             return self.send_json({"ok": True}, headers=headers)
+        user = self.user_or_401()
+        if not user:
+            return
+        s, uid = self.store, user["id"]
         if path == "/api/folder":
             return self.send_json(s.create_folder(uid, self.opt_int(body.get("parent")), body.get("name")), 201)
         if path == "/api/rename":
