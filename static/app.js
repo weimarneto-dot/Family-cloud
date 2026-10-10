@@ -28,6 +28,7 @@ async function api(path, body) {
   let data = null;
   try { data = await res.json(); } catch (e) { /* no body */ }
   if (res.status === 401 && path !== "/api/login") { showLogin(); throw new Error("Signed out"); }
+  if (res.status === 403 && data && data.error === "not_member") { showNoAccess(data); throw new Error("not_member"); }
   if (!res.ok) { const err = new Error((data && data.error) || "Request failed (" + res.status + ")"); err.status = res.status; err.data = data; throw err; }
   return data;
 }
@@ -53,6 +54,20 @@ function toast(text) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---- sign in / out -------------------------------------------------------------------------
+
+// A signed-in person who was not given this app (the admin chooses under People): the family's message and a way to sign out, never a login form (the same words as Forms, Mail, Photos and Writer).
+function showNoAccess(data) {
+  state.me = null;
+  state.noAccess = true;
+  $("app").hidden = true;
+  const box = $("login");
+  box.hidden = false;
+  const h = document.createElement("h1"); h.textContent = "fMily Cloud is private";
+  const p = document.createElement("p"); p.textContent = data.message || "";
+  const b = document.createElement("button"); b.type = "button"; b.textContent = "Sign out";
+  b.addEventListener("click", async () => { try { await api("/api/logout", {}); } catch (e) { /* signed out anyway */ } location.reload(); });
+  box.replaceChildren(h, p, b);
+}
 
 function showLogin() {
   state.me = null;
@@ -386,4 +401,4 @@ document.addEventListener("drop", (e) => {
 window.addEventListener("beforeunload", (e) => { if (jobs.some((j) => j.state === "running")) { e.preventDefault(); e.returnValue = ""; } });
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => { /* needs HTTPS or localhost */ });
-api("/api/me").then(start).catch(() => { if (!state.me) showLogin(); });
+api("/api/me").then(start).catch(() => { if (!state.me && !state.noAccess) showLogin(); });

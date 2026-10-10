@@ -724,8 +724,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def fail(self, status, message, **extra):
-        self.send_json({"error": message, **extra}, status)
+    def fail(self, status, error, **extra):
+        self.send_json({"error": error, **extra}, status)
 
     def token(self):
         jar = SimpleCookie(self.headers.get("Cookie", ""))
@@ -766,7 +766,7 @@ class Handler(BaseHTTPRequestHandler):
             return user
         who = self.sso.whoami(self.dlw_token())
         if who and not sso_mod.allows(who, "cloud"):
-            return None                                     # the account was not given this app: treated as not signed in here
+            return None                                     # the account was not given this app: user_or_401 answers 403 not_member
         return self.store.sso_user(who) if who else None
 
     def dlw_cookie_header(self, value, max_age):
@@ -775,10 +775,21 @@ class Handler(BaseHTTPRequestHandler):
             parts.append("Secure")
         return ("Set-Cookie", "; ".join(parts))
 
+    def refused_account(self):
+        """A signed-in family account that was not given this app (the admin chooses on the People page of fMily Home), else None."""
+        if self.sso is None:
+            return None
+        who = self.sso.whoami(self.dlw_token())
+        return who if who and not sso_mod.allows(who, "cloud") else None
+
     def user_or_401(self):
         user = self.current_user()
         if not user:
-            self.fail(401, "not signed in")
+            who = self.refused_account()
+            if who:                       # signed in, but not given this app: the same answer as Forms, Mail, Photos and Writer
+                self.fail(403, "not_member", message="Your account does not include fMily Cloud. Ask the family admin to tick it for you under People.", email=who["email"])
+            else:
+                self.fail(401, "not signed in")
         return user
 
     @staticmethod
