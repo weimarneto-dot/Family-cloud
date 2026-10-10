@@ -748,13 +748,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def cookie_header(self, value, max_age):
         parts = [f"{COOKIE}={value}", "Path=/", "HttpOnly", "SameSite=Strict", f"Max-Age={max_age}"]
-        if self.secure_cookie or self.headers.get("X-Forwarded-Proto") == "https":
+        if self.secure_cookie or sso_mod.effective_https(self.headers, self.client_address[0]):
             parts.append("Secure")
         return ("Set-Cookie", "; ".join(parts))
 
     def same_origin(self):
         origin = self.headers.get("Origin")
-        return not origin or urlparse(origin).netloc == self.headers.get("Host", "")
+        return not origin or urlparse(origin).netloc.lower() == sso_mod.effective_host(self.headers, self.client_address[0])
 
     def dlw_token(self):
         return sso_mod.cookie_value(self.headers.get("Cookie", ""), sso_mod.DW_COOKIE)
@@ -771,7 +771,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def dlw_cookie_header(self, value, max_age):
         parts = [f"{sso_mod.DW_COOKIE}={value}", "Path=/", "HttpOnly", "SameSite=Lax", f"Max-Age={max_age}"]
-        if self.secure_cookie or self.headers.get("X-Forwarded-Proto") == "https":
+        if self.secure_cookie or sso_mod.effective_https(self.headers, self.client_address[0]):
             parts.append("Secure")
         return ("Set-Cookie", "; ".join(parts))
 
@@ -1007,7 +1007,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; frame-src 'self'; connect-src 'self'; " + frame_ancestors(self.headers.get("Host")))
+        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; frame-src 'self'; connect-src 'self'; " + frame_ancestors(sso_mod.effective_host(self.headers, self.client_address[0])))
         self.end_headers()
         self.wfile.write(raw)
 

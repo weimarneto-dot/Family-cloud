@@ -121,3 +121,32 @@ def allows(who, app_id: str) -> bool:
     """False when the account was not given this app (the admin chooses on the People page of fMily Home); the admin account itself is always let in."""
     apps = who.get("apps")
     return bool(who.get("admin")) or apps is None or app_id in apps
+
+
+# ---- behind a reverse proxy on this machine (tailscale serve): which host and scheme did the browser use? --------------------------------------------------
+# The Host header may arrive as the tailnet name or rewritten to 127.0.0.1:<port>, and the X-Forwarded-* headers depend on the Tailscale version, so nothing may rely on one variant.
+# The trust boundary: a request is "from a local proxy" when its TCP peer is THIS machine and it carries X-Forwarded-For (a proxy that forwards sets it). Only then are
+# X-Forwarded-Host and X-Forwarded-Proto believed. The services listen on this machine or the home network; a peer on the network is never believed, whatever it sends.
+LOOPBACK_PEERS = ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+_HOSTPORT = __import__("re").compile(r"[a-z0-9.-]{1,253}(:[0-9]{1,5})?")
+
+
+def from_local_proxy(headers, peer: str) -> bool:
+    return peer in LOOPBACK_PEERS and bool(headers.get("X-Forwarded-For"))
+
+
+def effective_host(headers, peer: str) -> str:
+    """The host[:port] the browser used: X-Forwarded-Host from a proxy on this machine (the first value, lower case, only if it looks like a host), else the Host header."""
+    if from_local_proxy(headers, peer):
+        fwd = (headers.get("X-Forwarded-Host") or "").split(",")[0].strip().lower()
+        if fwd and _HOSTPORT.fullmatch(fwd):
+            return fwd
+    return headers.get("Host", "") or ""
+
+
+def effective_https(headers, peer: str) -> bool:
+    """True when a proxy on this machine says the browser used https (X-Forwarded-Proto), or forwarded a request for a *.ts.net name without saying (older tailscale serve)."""
+    if not from_local_proxy(headers, peer):
+        return False
+    proto = (headers.get("X-Forwarded-Proto") or "").split(",")[0].strip().lower()
+    return proto == "https" or (not proto and effective_host(headers, peer).split(":")[0].endswith(".ts.net"))
