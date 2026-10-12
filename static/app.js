@@ -196,7 +196,8 @@ const framed = (() => { try { return window.self !== window.top; } catch (e) { r
 function viewer(item) {
   const src = "/api/file/" + item.id;
   if (framed && /^(audio|video)\//.test(item.mime) && Number.isInteger(+item.id)) {
-    try { window.parent.postMessage({ fmily: "play", key: "c:" + (+item.id).toString(16).padStart(12, "0") }, "*"); return; } catch (e) { /* no parent: fall through to the built-in viewer */ }
+    // sound plays in fMily's bar and Cloud stays in front; a video opens in Play, where its picture is
+    try { window.parent.postMessage({ fmily: "play", key: "c:" + (+item.id).toString(16).padStart(12, "0"), stay: item.mime.startsWith("audio/") }, "*"); return; } catch (e) { /* no parent: fall through to the built-in viewer */ }
   }
   let body;
   if (item.mime.startsWith("image/")) body = el("img", { src, alt: item.name });
