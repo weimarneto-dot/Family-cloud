@@ -35,7 +35,8 @@ def username_from_email(email: str, taken) -> str:
 
 
 class Sso:
-    def __init__(self, upstream: str, ttl: float = 30.0, timeout: float = 4.0):
+    # a "yes" is kept 5 s too: an account removed or signed out in Downloader Web stops working here within 5 s, not 30
+    def __init__(self, upstream: str, ttl: float = 5.0, timeout: float = 4.0):
         self.upstream = upstream.rstrip("/")
         self.ttl, self.timeout = ttl, timeout
         self._cache: dict = {}
