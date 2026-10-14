@@ -38,7 +38,7 @@ input, select { font: inherit; font-size: 16px; color: var(--ink); background: v
 #crumbs { display: flex; flex-wrap: wrap; gap: 2px 4px; color: var(--muted); min-width: 0; }
 #crumbs button { background: transparent; color: var(--accent); padding: 2px 4px; border-radius: 6px; }
 #crumbs span.now { color: var(--ink); font-weight: 600; padding: 2px 4px; }
-#list { list-style: none; margin: 0; padding: 0 14px; display: grid; gap: 8px; }
+#list { list-style: none; margin: 0; padding: 0 14px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 #list li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
 #list li.open { cursor: pointer; }
 .thumb { flex: none; width: 48px; height: 48px; border-radius: 10px; background: var(--soft); color: var(--accent); display: grid; place-items: center; font-weight: 700; font-size: .75rem; overflow: hidden; }
