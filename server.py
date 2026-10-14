@@ -814,7 +814,12 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if not url.path.startswith("/api/"):
             return self.fail(404, "not found")
-        if self.headers.get(CSRF_HEADER[0]) != CSRF_HEADER[1] or "application/json" not in self.headers.get("Content-Type", "") or not self.same_origin():
+        if self.headers.get(CSRF_HEADER[0]) != CSRF_HEADER[1] or not self.same_origin():
+            return self.fail(403, "forbidden")
+        ctype = self.headers.get("Content-Type", "")
+        if not ctype:
+            return self.fail(415, "send Content-Type: application/json (body {} if empty)")
+        if "application/json" not in ctype:
             return self.fail(403, "forbidden")
         self.guarded(lambda: self.api_post(url.path, self.json_body()))
 

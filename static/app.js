@@ -291,7 +291,7 @@ async function shareSheet(item) {
     });
     return el("div", { class: "person" }, el("span", { class: "spacer" }, p.display_name), select);
   });
-  openSheet("Share “" + item.name + "”", el("p", {}, item.kind === "folder" ? "Everything inside is shared too. Editors can add, rename and delete files; viewers can only look and download." : "The person can open and download this file."),
+  openSheet("Share “" + item.name + "”", el("p", {}, item.kind === "folder" ? "Everything inside is shared too. People who can edit may add, rename and delete files; people who can view can only look and download." : "The person can open and download this file."),
     rows.length ? rows : el("p", {}, "There is nobody else on this server yet."), el("div", { class: "row" }, el("button", { type: "button", onclick: closeSheet }, "Done")));
 }
 

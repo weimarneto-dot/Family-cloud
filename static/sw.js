@@ -2,7 +2,7 @@
 // The network always wins when it answers, so a new version shows up on the next load.
 // Nothing under /api/ (files, thumbnails, uploads) is ever cached here.
 const CACHE = "family-cloud-shell-v1";
-const SHELL = ["/", "/style.css", "/app.js", "/manifest.webmanifest", "/icon.svg"];
+const SHELL = ["/", "/style.css", "/app.js", "/manifest.webmanifest", "/icon.svg", "/icon-180.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
