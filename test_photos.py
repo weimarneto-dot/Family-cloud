@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """fMily Cloud's Photos view: the date a photo was taken (the camera's EXIF, else the file's own date from the phone), newest first,
 paging, only your own pictures, thumbnails turned the way the camera says.
@@ -12,6 +13,8 @@ import time
 import unittest
 from pathlib import Path
 
+# the suite's server runs with no free-space margin (see test_cloud.py; the margin is the real server's rule)
+os.environ.setdefault("FAMILY_CLOUD_FREE_MARGIN_GB", "0")
 import server as cloud
 from test_cloud import Case, PNG_1x1
 
