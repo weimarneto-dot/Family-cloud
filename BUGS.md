@@ -1,5 +1,7 @@
 # Bug register: family-cloud
 
+> The autosave hook (`.git/hooks/post-commit`), if installed, must carry the default-branch guard (BUG-0002). Without it a commit on a branch tracking `main` is published to `main`.
+
 Every bug found in family-cloud, worked through the debugging protocol (`DEBUGGING.md` in the Downloader repository, D-1..D-10).
 IDs (`BUG-####`) are per repository, count up, and are never reused. Entry format: see `DEBUGGING.md`.
 
