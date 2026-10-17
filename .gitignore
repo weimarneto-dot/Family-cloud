@@ -1,7 +1,22 @@
-__pycache__/
-*.pyc
+# Environments
+.venv/
 node_modules/
-*.db
-*.db-wal
-*.db-shm
+__pycache__/
+
+# Build output
+dist/
+build/
+
+# OS / editor
 .DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Local state — never commit
+*.env
+.env.*
+config/local/
+data/
+*.sqlite
+*.db
