@@ -1,5 +1,21 @@
 # PROTOCOL.md — family-cloud
 
+## Section 0: Remote Actions (Standing Rule)
+
+GitHub remote actions are forbidden until you have listed the existing branches
+and tags and confirmed with the owner what the default branch state is.
+
+- All pushes go to a NEW review branch — never to main, never to an existing
+  branch.
+- If a push to a non-empty repo would overwrite anything, stop and report.
+- No force-push, no history rewrite, ever.
+- The owner merges review branches with git merge --no-ff after review.
+
+Adopted 2026-10-17, after an AI session overwrote README.md and .gitignore on
+main by assuming a blank slate (commits 7d1a4e2 and 1faf60a). The overwrite was
+fully restored — verified by identical git blob SHAs against b4495c2 — but the
+review gate should have prevented it, not the recovery.
+
 ## Section 1: Version Control Protocol
 
 - Branches: feat/description-date, fix/description-date,
