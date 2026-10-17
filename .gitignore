@@ -1,22 +1,7 @@
-# Environments
-.venv/
-node_modules/
 __pycache__/
-
-# Build output
-dist/
-build/
-
-# OS / editor
-.DS_Store
-*.swp
-.idea/
-.vscode/
-
-# Local state — never commit
-*.env
-.env.*
-config/local/
-data/
-*.sqlite
+*.pyc
+node_modules/
 *.db
+*.db-wal
+*.db-shm
+.DS_Store

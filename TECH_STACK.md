@@ -1,24 +1,25 @@
 # Technology Stack — family-cloud
 
-Fill in every TODO before writing feature code. Update the Rationale log whenever
-a choice changes.
+Verified against the actual code (README, server.py, family-cloud.service).
+TODO = decided in code but not yet documented here.
 
-| # | Decision | Question | Choice | Version pinned | Verification Method |
-|---|----------|----------|--------|----------------|---------------------|
-| 1 | Frontend | Web, mobile, desktop? | Web PWA (works on phones + desktop) | TODO | Installs to phone home screen; loads via Tailscale |
-| 2 | UI framework | React / Vue / Svelte / etc.? | TODO | TODO | Hello World renders on phone |
-| 3 | Backend | Node / Python / Go / etc.? | TODO | TODO | GET /healthz responds 200 OK |
-| 4 | Database | SQL / NoSQL / file-based? | SQLite (embedded, fits P50, easy backups) | TODO | Store + retrieve a test record across restart |
-| 5 | Media storage | Local / remote / both? | Local disk on P50, rsync-backed | TODO | Files persist across restarts |
-| 6 | Auth | Sessions / Tokens / OAuth? | Tailscale identity + app-level session tokens | TODO | Login state survives app restart |
-| 7 | Hosting | Self-hosted / cloud? | Self-hosted on P50 (systemd user service) | TODO | Service accessible at Tailscale Funnel URL |
-| 8 | Updates | Manual / PWA / auto? | PWA service-worker update prompt + rollback | TODO | New version loads without hard reload |
-| 9 | Transcription | Whisper variant? | whisper.cpp or faster-whisper on P50 | TODO | Sample audio produces transcript job result |
+| # | Decision | Choice (verified) | Verification |
+|---|----------|------------------|--------------|
+| 1 | Frontend | Static web app (static/), installable on the phone home screen | Opens on phone; login survives restart |
+| 2 | Backend | Python standard library only (server.py), port 8778 | python3 test_cloud.py — 36 tests pass |
+| 3 | Database | Single SQLite database (cloud.db) | Store + retrieve across restart |
+| 4 | File storage | blobs/ by id on any drive (--data-dir); --require-mount refuses uploads (503) when drive missing; 507 under 5 GB margin; 50 GB max file | Files persist; guards fire |
+| 5 | Auth | scrypt passwords; hashed session tokens, 30 days; X-Requested-With header + Origin check; HttpOnly SameSite=Strict cookie | test_cloud.py auth tests |
+| 6 | Thumbnails | ffmpeg at low priority; workers = cores (FAMILY_CLOUD_WORKERS) | Thumbnails render for pictures/video |
+| 7 | Hosting | systemd user service (family-cloud.service), Nice=10, on the P50 | systemctl --user status family-cloud |
+| 8 | Remote access | tailscale serve HTTPS on the tailnet (port 8444). NOT Funnel — no public exposure | Opens on phone via tailnet URL |
+| 9 | Uploads | 4 MB chunked, resume across dropped connections; 507/503 guards | Large upload survives disconnect |
+| 10 | Tests | test_cloud.py (36) + browser smoke test (tests/smoke.js, Chromium) | Both suites green |
 
 ## Rationale log
 
-- **SQLite:** single-file database, trivial to back up alongside config, no extra
-  service to babysit on the P50.
-- **Systemd user service:** keeps the app under user control; KillMode=process
-  preserves running jobs across service restarts.
-- TODO: add one rationale entry per row as choices are finalized.
+- Python stdlib only: same design and building blocks as Family Chat; nothing
+  to install or patch on the P50.
+- Single SQLite database: one metadata file to back up next to blobs/.
+- tailscale serve, not Funnel: Funnel would put everyone's files on the public
+  internet (explicit README decision).

@@ -1,35 +1,29 @@
-# Security Boundaries — family-cloud
+# Security — family-cloud
+
+Verified from the README security notes; details in server.py.
 
 ## Trust zones
 
 | Zone | Access | Allowed |
 |------|--------|---------|
-| localhost (P50) | Trusted | Full API access, job control |
-| Tailscale Funnel | Authenticated remote | API + media streaming, valid session required |
-| Public internet | Blocked | Nothing; no direct ports exposed |
+| localhost (P50) | Trusted | server.py on 127.0.0.1:8778; admin CLI (add-user, set-quota, ...) |
+| Tailscale tailnet | Household devices | HTTPS via tailscale serve :8444 |
+| Public internet | Blocked | Nothing — Funnel deliberately not used |
 
-## Path traversal prevention
+## Mechanisms (as implemented)
 
-- All file-serving endpoints resolve the requested path BEFORE validation:
+- Passwords hashed with scrypt; repeated wrong passwords lock that user/address
+  pair out for a while.
+- Sessions: random tokens stored hashed, 30 days.
+- CSRF: every POST needs the X-Requested-With: family-cloud header and a
+  matching Origin; cookie is HttpOnly, SameSite=Strict.
+- XSS: names shown as text, never HTML; strict Content-Security-Policy; only
+  safe types displayed inline, everything else downloads.
+- Path traversal: paths never come from the user — nothing to traverse.
 
-```
-const resolved = path.resolve(root, requested);
-if (!resolved.startsWith(root + path.sep)) return 403;
-```
+## Release checklist
 
-- User-supplied filenames are never used as storage paths — only database
-  keys map to on-disk locations.
-
-## Access control
-
-- Every endpoint except /healthz and login requires a valid session; deny with
-  403 (not 404) so family members see a clear "not allowed" signal.
-- Admin-only routes (job submission, user management) check role explicitly.
-
-## Test cases (must pass before any release)
-
-1. GET /files?path=../../etc/passwd returns 403.
-2. Unauthenticated request to any media endpoint returns 403.
-3. Session token from a revoked user returns 403 immediately.
-4. Upload of a file named ../../evil.mp4 is stored under a content key; the
-   original name is kept as metadata only.
+1. python3 test_cloud.py passes (36 tests).
+2. Unauthenticated request to any file endpoint is refused.
+3. POST without the X-Requested-With header is refused.
+4. Service not reachable from the public internet (Funnel off).

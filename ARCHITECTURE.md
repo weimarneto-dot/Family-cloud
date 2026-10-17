@@ -2,37 +2,44 @@
 
 ## Component diagram
 
-```
-User Device (Phone / Linux / Windows)
+User Device (phone / computer on the Tailscale tailnet)
         |
-        |---> [C1] fMily Play App (PWA frontend)
-        |             |
-        |             +---> [C2] API Gateway (backend on P50)
-        |                        |
-        |                        +---> [C3] Database (SQLite)
-        |                        +---> [C4] Media Storage (local disk)
-        |                        +---> [C5] Media Pipeline (Whisper / job queue)
-        |
-        +---> [C6] Tailscale Funnel (authenticated remote access)
-```
+        +---> [C6] tailscale serve --https=8444 (TLS, tailnet only; NOT Funnel)
+                    |
+                    +---> [C2] server.py (Python stdlib HTTP, 127.0.0.1:8778)
+                              |
+                              +---> [C3] cloud.db (SQLite: users, sessions,
+                              |        folder/file tree, shares, trash)
+                              +---> [C4] blobs/ (file content by id, on any
+                              |        drive via --data-dir)
+                              +---> [C5] thumbs/ (ffmpeg thumbnails, low
+                                       priority, rebuildable)
+
+[C1] the web app (static/) is served by [C2].
 
 ## Numbered component references
 
-- **C1 — fMily Play frontend.** PWA served as static files. Talks only to C2
-  over HTTPS; never directly to C3/C4/C5.
-- **C2 — API Gateway.** The only public-facing code surface. Validates paths
-  (see SECURITY.md), checks sessions, and enqueues jobs.
-- **C3 — Database.** App state: users, sessions, job records, file metadata.
-- **C4 — Media storage.** Immutable original files; keyed paths only.
-- **C5 — Media pipeline.** Worker(s) consuming jobs.json; writes run history
-  to downloader_run_history.json. Runs under systemd with KillMode=process so
-  active jobs survive service restarts.
-- **C6 — Tailscale Funnel.** Terminates TLS; forwards to C2. No router port
-  forwarding; the public internet cannot reach anything else on the P50.
+- **C1 — Web app (static/).** Talks only to C2 over HTTPS on the tailnet.
+- **C2 — server.py.** The only code surface: logins, chunked uploads, ranged
+  downloads, thumbnails, rename/move/search, sharing, trash, quotas,
+  free-space margin.
+- **C3 — cloud.db.** All app state. Back up together with C4.
+- **C4 — blobs/.** Immutable content by id; rename/move never touches bytes.
+- **C5 — thumbs/.** ffmpeg at low priority (service runs Nice=10 so Downloader
+  jobs win); as many workers as cores. Rebuildable.
+- **C6 — tailscale serve.** Terminates TLS on tailnet port 8444. Funnel is
+  explicitly NOT used: no public internet exposure.
 
-## Data flow example (MVP slice)
+## Data flow example
 
-1. C1 requests the file list: C1 -> C2 -> C3 (metadata) -> C1 renders list.
-2. C1 requests playback: C2 streams from C4 -> C1 plays.
-3. Transcription: C2 enqueues job in C5 -> C5 writes result to C4 and status
-   to C3 -> C1 polls or receives update.
+1. Phone opens the app: C6 -> C2 serves C1; login session from C3.
+2. Upload: C1 sends 4 MB chunks -> C2 writes into C4 -> metadata into C3.
+3. Share: C2 records viewer/editor grant in C3, inherited down folders;
+   editors cannot touch the share root.
+4. Delete: C2 moves the entry to trash in C3; kept 30 days.
+
+## Neighbouring services
+
+Other family-cloud services on the same P50 (Whisper transcription, Downloader
+job queue — jobs.json, downloader_run_history.json) run under their own
+systemd units and are documented separately.

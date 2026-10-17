@@ -1,36 +1,34 @@
 # Project Charter — family-cloud
 
-Last updated: 2026-10-17 · Owner: Weimar Neto · Status: Draft
+Last updated: 2026-10-17 · Owner: Weimar Neto · Status: Active
 
 ## Problem (one sentence)
 
-family-cloud lets the household store, stream, and manage its own media and
-files from any device, without depending on third-party cloud services.
+The family needs a private place to store, share, and reach its files from any
+device — a small self-hosted Google Drive / iCloud Drive — without third-party
+cloud services.
 
 ## Primary user (one specific profile)
 
-Weimar Neto — technical owner and administrator of the self-hosted server —
-plus 2–3 non-technical family members who use the apps from phones and laptops
-and should never need to know the server exists.
+The household: 2–3 non-technical family members who use the app from their
+phones (installed to the home screen) and never need to know the server exists;
+administered by Weimar Neto on the P50.
 
 ## Top 3 use cases
 
-1. **Watch/listen anywhere:** A family member opens the fMily Play app on their
-   phone (via Tailscale) and plays a video or audio file stored on the P50.
-2. **Add media easily:** New media is uploaded or downloaded via the job queue
-   and becomes available to everyone after automatic processing (e.g. Whisper
-   transcription).
-3. **Reliable remote access:** Content keeps working on flaky mobile
-   connections — partial uploads never corrupt files, and queued actions sync
-   when the connection returns.
+1. Upload from phone or computer — big files go in 4 MB pieces and carry on
+   after a dropped connection — and reach them from any device.
+2. Share a file or folder with a named family member as viewer or editor.
+3. Deleted things are recoverable: trash keeps them 30 days.
 
-## Explicitly out of scope for v1
+## Explicitly out of scope for v1 (from README)
 
-1. Public internet access / user registration for strangers.
-2. Multi-tenant support beyond the immediate household.
-3. Native mobile apps (v1 is a PWA).
-4. Automatic media library scraping / metadata enrichment.
-5. Real-time collaboration features.
+1. Sync folders on a computer or WebDAV.
+2. Automatic photo backup from the phone.
+3. Public links for people without an account.
+4. End-to-end encryption (server holds files in the clear — protect the drive).
+5. Version history.
+6. Resuming an upload after the page was closed or reloaded.
 
 ## 60-second check
 

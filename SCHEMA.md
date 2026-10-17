@@ -1,37 +1,33 @@
 # Data Model — family-cloud
 
+Source of truth: server.py (schema) and test_cloud.py (behavior). The notes
+below are verified from the README; confirm exact field names in server.py
+before coding against them.
+
 ## Entities
 
-| Entity | Purpose | Key fields (v1) |
-|--------|---------|----------------|
-| User | Household member | id, name, role (admin/member), created_at |
-| Session | Login state | id, user_id, token_hash, expires_at |
-| MediaFile | A stored file | id, storage_path, mime_type, size_bytes, checksum, uploaded_by, created_at |
-| Playlist | Ordered collection | id, name, owner_id, visibility |
-| PlaylistItem | Membership | playlist_id, media_file_id, position |
-| Job | Pipeline task | id, type (transcribe/download), status (queued/running/done/failed), payload, created_at, finished_at |
+| Entity | Purpose | Notes (verified) |
+|--------|---------|------------------|
+| User | Household account | username, display name, per-person quota (add-user --quota-gb); no sign-up page |
+| Session | Login state | random token stored hashed, 30 days; cookie HttpOnly SameSite=Strict |
+| Folder | Directory tree | per-person tree in SQLite |
+| File | Stored file | content lives in blobs/ by id; rename/move never copies bytes |
+| Share | Viewer/editor grant | with a named person; inherited down folders; editors cannot touch the share root |
+| Trash entry | Soft delete | kept 30 days |
 
 ## Relationships
 
-- User 1—N MediaFile (uploaded_by)
+- User 1—N Folder/File (per-person files and folders)
 - User 1—N Session
-- Playlist N—M MediaFile via PlaylistItem
-- Job N—1 MediaFile (target file, nullable)
+- Share N—1 User (grantee); Share N—1 Folder/File (target)
 
 ## Storage layout
 
-- App state: SQLite (single file, trivially backup-able).
-- Job queue: jobs.json (working queue) + downloader_run_history.json
-  (append-only run history); both included in config backups.
-- Media files: flat content-addressed directories — no user-supplied paths;
-  original filenames stored only as metadata.
+- cloud.db: all metadata.
+- blobs/: file content by id, under --data-dir (any drive).
+- thumbs/: thumbnails, rebuildable.
+- Back up cloud.db and blobs/ together — one without the other is not a backup.
 
-## Sample records (test fixtures)
+## Sample records
 
-```json
-{ "user":    { "id": 1, "name": "Weimar", "role": "admin" },
-  "media":   { "id": 42, "storage_path": "ab/cdef1234", "mime_type": "video/mp4",
-               "size_bytes": 8300000, "checksum": "sha256:..." },
-  "job":     { "id": 7, "type": "transcribe", "status": "running",
-               "payload": { "media_file_id": 42 } } }
-```
+TODO: after first run on the P50, paste one real row per table here (redacted).
