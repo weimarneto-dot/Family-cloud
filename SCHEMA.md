@@ -1,32 +1,31 @@
 # Data Model — family-cloud
 
-Source of truth: server.py (schema) and test_cloud.py (behavior). The notes
-below are verified from the README; confirm exact field names in server.py
-before coding against them.
+Source of truth: the SCHEMA constant in server.py and test_cloud.py. This
+document mirrors it; if code and this file disagree, the code wins and this
+file must be fixed.
 
-## Entities
+## Tables (verified against server.py, 2026-10-17)
 
-| Entity | Purpose | Notes (verified) |
-|--------|---------|------------------|
-| User | Household account | username, display name, per-person quota (add-user --quota-gb); no sign-up page |
-| Session | Login state | random token stored hashed, 30 days; cookie HttpOnly SameSite=Strict |
-| Folder | Directory tree | per-person tree in SQLite |
-| File | Stored file | content lives in blobs/ by id; rename/move never copies bytes |
-| Share | Viewer/editor grant | with a named person; inherited down folders; editors cannot touch the share root |
-| Trash entry | Soft delete | kept 30 days |
+| Table | Purpose | Key columns |
+|-------|---------|-------------|
+| users | Household account | id, username (unique, 2–32 chars a-z0-9_.-), display_name, pw_hash (scrypt), quota_bytes, disabled, created |
+| sessions | Login state | token_hash (sha256 of token, PK), user_id, created, last_seen; valid 30 days |
+| items | Folder tree and files — ONE table, not separate entities | id, owner_id, parent_id (NULL = root), name (unique per parent, case-insensitive, among un-trashed), kind ('file'/'folder'), size, mime, blob, sha256, created, modified, trashed (NULL = live; timestamp = in trash) |
+| shares | Viewer/editor grants | item_id + user_id (PK), role ('view'/'edit'), created; inherited down folders |
+| uploads | Chunked upload state | id (32-hex), user_id, owner_id, parent_id, name, size, received, mime, created; stale after 24 h |
 
-## Relationships
+## Trash model
 
-- User 1—N Folder/File (per-person files and folders)
-- User 1—N Session
-- Share N—1 User (grantee); Share N—1 Folder/File (target)
+Trash is not a table: an item with trashed set is in the trash, kept 30 days
+(TRASH_DAYS), purged with its subtree. A trashed item is not shared anymore.
 
-## Storage layout
+## Storage layout (on --data-dir, any drive)
 
-- cloud.db: all metadata.
-- blobs/: file content by id, under --data-dir (any drive).
-- thumbs/: thumbnails, rebuildable.
-- Back up cloud.db and blobs/ together — one without the other is not a backup.
+- cloud.db — all metadata (SQLite, WAL mode)
+- blobs/<first 2 hex>/<blob> — file content by id; rename/move never copies bytes
+- tmp/ — in-flight chunked uploads
+- thumbs/<blob>.jpg — ffmpeg thumbnails, rebuildable
+- Back up cloud.db together with blobs/ — one without the other is not a backup.
 
 ## Sample records
 
