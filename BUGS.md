@@ -15,10 +15,11 @@ IDs (`BUG-####`) are per repository, count up, and are never reused. Entry forma
 - Done: 2026-10-16 on this machine. Not verified: the other machines that clone this repo (each needs the same hook).
 
 ### BUG-0003 - .gitignore covers the databases but not the server's data directories and runtime files (blobs/, thumbs/, uploads/, *.log, .env)
-- Severity: S3          - Status: fixed pending review (this branch; the fix commit follows this registration)
-- Opened: 2026-10-17 (the 2026-10-17 exposure scan of this repository; same class as family-home/BUG-0004, the tracked-log-files finding)
+- Severity: S3          - Status: closed
+- Opened: 2026-10-17 (the 2026-10-17 exposure scan of this repository; same class as family-home/BUG-0004, the tracked-log-files finding)   - Closed: 2026-10-21
 - Evidence: the 2026-10-17 exposure scan (43 commits, 9 branches) verified that zero data files, logs, .env or key files were ever committed — but .gitignore covers only `*.db`, `*.db-wal`, `*.db-shm` and build caches. The server's runtime directories (`blobs/`, `thumbs/`, `uploads/`), `*.log` and `.env` are not ignored, so the data-dir convention is the only thing keeping a future `git add -A` from staging family files. Tracked equals published-to-the-remote (PROTOCOL.md Section 0, merged 9d145fc).
 - Verify: before the fix, `git check-ignore -v blobs/x thumbs/y uploads/z run.log .env` prints nothing for any of the five.
 - Fix: .gitignore extended with `blobs/`, `thumbs/`, `uploads/`, `*.log`, `.env` — defence in depth behind the Section 0 visibility clause, not a substitute for it.
 - Check: `git check-ignore -v` returns a .gitignore line for each of the five; `python3 -m unittest test_cloud` still 36/36. (Not verified in this session's sandbox — no clone or test run there; the P50 should confirm.)
-- Done: 2026-10-17 on branch `fix/gitignore-data-dirs-2026-10-17`, awaiting review.
+  2026-10-21, on the merged tree (a throwaway branch from `main` `9d145fc` with this branch merged): `git check-ignore -v` matched 5/5; `python3 -m unittest test_cloud`: `Ran 36 tests ... OK`. The P50 checkout: (not verified, no access from that session).
+- Done: 2026-10-17 on branch `fix/gitignore-data-dirs-2026-10-17`. Merged to `main` 2026-10-21 by PR #2 (merge commit `914e8ff`), on the owner's instruction "Finish the organisation and do not let anything open"; the owner had not read the diff, so the merging session owns any drift (AGENTS.md, approval follows evidence).
