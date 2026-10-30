@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b6b53">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Family Cloud">
-<title>Family Cloud</title>
+<meta name="apple-mobile-web-app-title" content="fMily Cloud">
+<title>fMily Cloud</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/icon-180.png">
@@ -15,8 +15,8 @@
 <body>
 <section id="login" hidden>
   <form id="login-form" autocomplete="on">
-    <h1>Family Cloud</h1>
-    <label>Username <input name="username" autocomplete="username" autocapitalize="none" autocorrect="off" required></label>
+    <h1><img class="fm-logo" src="fmily-logo.svg" alt="fMily"> Cloud</h1>
+    <label>Username or e-mail <input name="username" autocomplete="username" autocapitalize="none" autocorrect="off" required></label>
     <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
     <p id="login-error" role="alert"></p>
     <button type="submit">Sign in</button>
@@ -25,6 +25,7 @@
 
 <section id="app" hidden>
   <header id="top">
+    <img class="fm-logo" src="fmily-logo.svg" alt="fMily">
     <div class="titles"><strong id="me-name"></strong><small id="storage"></small></div>
     <span class="spacer"></span>
     <button id="sign-out" type="button">Sign out</button>
@@ -32,6 +33,7 @@
   <div id="drive-warning" role="alert" hidden>The storage drive is not connected: you can look around, but nothing can be uploaded right now.</div>
   <nav id="tabs">
     <button type="button" data-tab="files" class="on">My files</button>
+    <button type="button" data-tab="photos">Photos</button>
     <button type="button" data-tab="shared">Shared with me</button>
     <button type="button" data-tab="trash">Trash</button>
     <input id="search" type="search" placeholder="Search" aria-label="Search files" autocomplete="off">
@@ -42,9 +44,13 @@
     <button id="new-folder" class="icon" type="button">New folder</button>
     <button id="upload" type="button">Upload</button>
     <button id="empty-trash" class="icon" type="button" hidden>Empty trash</button>
+    <button id="upload-photos" type="button" hidden>Upload photos</button>
     <input id="file" type="file" multiple hidden>
+    <input id="photo-file" type="file" accept="image/*,video/*" multiple hidden>
   </div>
   <ul id="list" aria-label="Files"></ul>
+  <div id="photos" aria-label="Photos" hidden></div>
+  <div id="photos-more" aria-hidden="true"></div>
   <p id="empty" hidden></p>
   <div id="uploads" hidden>
     <div class="head"><strong id="uploads-title">Uploading</strong><span class="spacer"></span><button id="uploads-close" class="icon" type="button">Hide</button></div>
@@ -56,8 +62,10 @@
   <form id="sheet-form"></form>
 </div>
 <div id="viewer" hidden role="dialog" aria-label="Preview">
-  <div class="viewer-bar"><strong id="viewer-name"></strong><span class="spacer"></span><a id="viewer-download" class="btn" download>Download</a><button id="viewer-close" type="button">Close</button></div>
+  <div class="viewer-bar"><strong id="viewer-name"></strong><span class="spacer"></span><a id="viewer-download" class="btn" download>Download</a><button id="viewer-trash" type="button" hidden>Delete</button><button id="viewer-close" type="button">Close</button></div>
   <div id="viewer-body"></div>
+  <button id="viewer-prev" class="viewer-nav" type="button" aria-label="Previous photo" hidden>‹</button>
+  <button id="viewer-next" class="viewer-nav" type="button" aria-label="Next photo" hidden>›</button>
 </div>
 <div id="toast" role="status" hidden></div>
 <script src="/app.js"></script>

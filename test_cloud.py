@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Family Cloud server: logins, files and folders, chunked uploads, downloads, sharing, trash, limits.
+"""fMily Cloud server: logins, files and folders, chunked uploads, downloads, sharing, trash, limits.
 
   python3 test_cloud.py
 """
@@ -13,6 +13,10 @@ import threading
 import time
 import unittest
 from pathlib import Path
+
+# The suite's own server runs with no free-space margin: the margin is a rule of the real server (README, BUG-0001 in this repo), and
+# the tests use a small temporary folder that is often nearly full. The quota test below still checks the rule through the constant.
+os.environ.setdefault("FAMILY_CLOUD_FREE_MARGIN_GB", "0")
 
 import server as cloud
 

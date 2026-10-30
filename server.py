@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Family Cloud: private file storage for the family, like Google Drive or iCloud, on the home server.
+"""fMily Cloud: private file storage for the family, like Google Drive or iCloud, on the home server.
 Standard library only (ffmpeg, if installed, makes thumbnails).
 
 Everyone has their own files and folders behind a login, can share a file or folder with another family
 member (view or edit), and gets a trash that keeps deleted things for 30 days. Uploads are chunked and can
 resume after the phone loses its connection; downloads support byte ranges, so video plays and seeks.
-The web app in static/ is an installable PWA with the same look as Family Chat.
+The web app in static/ is an installable PWA with the same look as fMily Chat.
 
   python3 server.py add-user anna --name "Anna" [--quota-gb 200]     # asks for a password; no quota = the drive's limit
   python3 server.py list-users | reset-password anna | disable-user anna | set-quota anna 200 (0 = no limit)
@@ -25,6 +25,7 @@ import hashlib
 import hmac
 import json
 import mimetypes
+import struct
 import os
 import re
 import secrets
@@ -39,6 +40,16 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
+
+import sso as sso_mod
+
+
+def frame_ancestors(host_header):
+    """Who may show this app in a frame: fMily Home, which is another port of this same machine (nobody else)."""
+    host = (host_header or "").rsplit(":", 1)[0].strip("[]").lower()
+    if host and re.fullmatch(r"[a-z0-9.-]{1,253}", host):
+        return f"frame-ancestors https://{host}:* http://{host}:*"
+    return "frame-ancestors 'none'"
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_DATA = Path(os.environ.get("FAMILY_CLOUD_DATA", Path.home() / ".local" / "share" / "family-cloud"))
@@ -88,7 +99,7 @@ class ApiError(Exception):
         self.status, self.message, self.extra = status, message, extra
 
 
-# ---- passwords (same scheme as Family Chat) ------------------------------------------------
+# ---- passwords (same scheme as fMily Chat) ------------------------------------------------
 
 def hash_password(password, salt=None, n=2 ** 14, r=8, p=1):
     salt = salt or secrets.token_bytes(16)
@@ -131,6 +142,78 @@ def guess_mime(name):
     return mimetypes.guess_type(name)[0] or "application/octet-stream"
 
 
+# ---- photos: the date a picture was taken and which way up it is (from the JPEG's EXIF; the same reader as fMily Photos) ---------
+
+def read_exif(path):
+    """(taken timestamp or None, orientation 1-8) from the start of a JPEG. Standard library only."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(262144)
+    except OSError:
+        return None, 1
+    if head[:2] != b"\xff\xd8":
+        return None, 1
+    taken, orient, i = None, 1, 2
+    while i + 4 <= len(head):
+        if head[i] != 0xFF:
+            i += 1
+            continue
+        m = head[i + 1]
+        if m in (0xD8, 0x01) or 0xD0 <= m <= 0xD7:
+            i += 2
+            continue
+        if m in (0xD9, 0xDA):
+            break
+        seg_len = struct.unpack(">H", head[i + 2:i + 4])[0]
+        seg = head[i + 4:i + 2 + seg_len]
+        if m == 0xE1 and seg[:6] == b"Exif\0\0":
+            try:
+                taken, orient = _exif(seg[6:])
+            except (struct.error, IndexError, ValueError):
+                pass
+        i += 2 + seg_len
+    return taken, orient
+
+
+def _exif(t):
+    end = "<" if t[:2] == b"II" else ">"
+    u16 = lambda o: struct.unpack(end + "H", t[o:o + 2])[0]      # noqa: E731
+    u32 = lambda o: struct.unpack(end + "I", t[o:o + 4])[0]      # noqa: E731
+    taken, orient, exif_ifd = None, 1, None
+
+    def ifd(off, depth=0):
+        nonlocal taken, orient, exif_ifd
+        n = u16(off)
+        for k in range(min(n, 200)):
+            e = off + 2 + 12 * k
+            tag, typ, cnt, val = u16(e), u16(e + 2), u32(e + 4), e + 8
+            if tag == 0x0112:
+                orient = u16(val)
+            elif tag == 0x8769 and depth == 0:
+                exif_ifd = u32(val)
+            elif tag in (0x9003, 0x9004, 0x0132) and typ == 2 and cnt >= 19:
+                o = u32(val) if cnt > 4 else val
+                s = t[o:o + 19].decode("ascii", "ignore")
+                if re.match(r"^\d{4}:\d\d:\d\d \d\d:\d\d:\d\d$", s) and (taken is None or tag == 0x9003):
+                    try:
+                        taken = time.mktime(time.strptime(s, "%Y:%m:%d %H:%M:%S"))
+                    except (ValueError, OverflowError):
+                        pass
+    ifd(u32(4))
+    if exif_ifd:
+        ifd(exif_ifd, 1)
+    return taken, orient
+
+
+def plausible_time(ts):
+    """A file date from a browser, or None: after 1990 and not in the future."""
+    try:
+        ts = float(ts)
+    except (TypeError, ValueError):
+        return None
+    return ts if 631152000 <= ts <= time.time() + 86400 else None
+
+
 # ---- storage -------------------------------------------------------------------------------
 
 class Store:
@@ -147,6 +230,13 @@ class Store:
         with closing(self.conn()) as c, c:
             c.execute("PRAGMA journal_mode=WAL")
             c.executescript(SCHEMA)
+            if "sso_email" not in [r[1] for r in c.execute("PRAGMA table_info(users)")]:
+                c.execute("ALTER TABLE users ADD COLUMN sso_email TEXT")    # the Downloader Web account this user is (single sign-on)
+            c.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_sso_email ON users(sso_email) WHERE sso_email IS NOT NULL")
+            if "taken" not in [r[1] for r in c.execute("PRAGMA table_info(items)")]:
+                c.execute("ALTER TABLE items ADD COLUMN taken REAL")             # when a photo or video was taken (the camera's date), for the Photos view
+            if "modified" not in [r[1] for r in c.execute("PRAGMA table_info(uploads)")]:
+                c.execute("ALTER TABLE uploads ADD COLUMN modified REAL")       # the file's own date on the phone or computer it came from
         self.purge_trash()
         self.purge_stale_uploads()
 
@@ -217,6 +307,40 @@ class Store:
                 c.execute("UPDATE sessions SET last_seen=? WHERE token_hash=?", (time.time(), h))
         return dict(row) if row else None
 
+    # single sign-on: the user that belongs to a Downloader Web account (made on first visit)
+    def ensure_sso_users(self, people):
+        """A Cloud user for every account of the family, made before they ever open Cloud, so anybody can be given a file or a folder."""
+        for p in people:
+            self.sso_user({"email": str(p["email"]).strip().lower(), "name": str(p.get("name") or "")})
+
+    def sso_user(self, who):
+        email = who["email"]
+        with closing(self.conn()) as c:
+            row = c.execute("SELECT id, username, display_name, quota_bytes, disabled FROM users WHERE sso_email=?", (email,)).fetchone()
+        if row is None:
+            with self.write_lock, closing(self.conn()) as c, c:
+                row = c.execute("SELECT id, username, display_name, quota_bytes, disabled FROM users WHERE sso_email=?", (email,)).fetchone()
+                if row is None:
+                    taken = lambda n: c.execute("SELECT 1 FROM users WHERE username=?", (n,)).fetchone() is not None   # noqa: E731
+                    username = sso_mod.username_from_email(email, taken)
+                    name = (who.get("name") or "").strip() or username
+                    c.execute("INSERT INTO users(username, display_name, pw_hash, created, sso_email) VALUES(?,?,?,?,?)",
+                              (username, name, "!", time.time(), email))      # "!" = no local password
+                    row = c.execute("SELECT id, username, display_name, quota_bytes, disabled FROM users WHERE sso_email=?", (email,)).fetchone()
+        if row["disabled"]:
+            return None
+        return {"id": row["id"], "username": row["username"], "display_name": row["display_name"], "quota_bytes": row["quota_bytes"], "last_seen": time.time()}
+
+    def link_sso(self, username, email):
+        """Make an existing user the owner of a Downloader Web e-mail address, so that account signs in to this user."""
+        with self.write_lock, closing(self.conn()) as c, c:
+            try:
+                cur = c.execute("UPDATE users SET sso_email=? WHERE username=?", (email.strip().lower(), username))
+            except sqlite3.IntegrityError:
+                raise ValueError("that e-mail address already belongs to another user") from None
+            if not cur.rowcount:
+                raise ValueError(f"no user {username!r}")
+
     def end_session(self, token):
         with self.write_lock, closing(self.conn()) as c, c:
             c.execute("DELETE FROM sessions WHERE token_hash=?", (hashlib.sha256(token.encode()).hexdigest(),))
@@ -226,7 +350,7 @@ class Store:
         own = c is None
         c = c or self.conn()
         try:
-            return c.execute("SELECT COALESCE(SUM(size), 0) FROM items WHERE owner_id=? AND kind='file'", (owner_id,)).fetchone()[0]
+            return c.execute("SELECT COALESCE(SUM(size), 0) FROM items WHERE owner_id=? AND kind='file' AND COALESCE(blob,'') NOT LIKE 'dl%'", (owner_id,)).fetchone()[0]
         finally:
             if own:
                 c.close()
@@ -306,7 +430,8 @@ class Store:
             role = "owner" if r["owner_id"] == user_id else self.role_of(c, user_id, r)
             out.append({"id": r["id"], "name": r["name"], "kind": r["kind"], "size": r["size"], "mime": r["mime"], "owner": r["owner_id"],
                         "modified": r["modified"], "created": r["created"], "role": role, "shared": r["id"] in shared,
-                        "trashed": r["trashed"], "thumb": bool(r["mime"] in THUMBABLE and r["blob"])})
+                        "trashed": r["trashed"], "thumb": bool(r["mime"] in THUMBABLE and r["blob"]),
+                        "taken": r["taken"] if "taken" in r.keys() else None})
         return out
 
     @staticmethod
@@ -363,6 +488,33 @@ class Store:
                     seen.add(r["id"])
                     rows.append(r)
             return self.describe(c, user_id, self.order(rows))
+
+    def photos(self, user_id, before=None, before_id=None, limit=240):
+        """Your photos and videos (everything in My files, any folder), newest first by the date they were taken: one page, then the next
+        page starts after the last one (before = its date, before_id = its id). Items uploaded before the Photos view get their date once, here."""
+        limit = max(1, min(int(limit or 240), 500))
+        with closing(self.conn()) as c:
+            live = ("WITH RECURSIVE live(id) AS (SELECT id FROM items WHERE owner_id=? AND parent_id IS NULL AND trashed IS NULL "
+                    "UNION ALL SELECT i.id FROM items i JOIN live l ON i.parent_id=l.id WHERE i.trashed IS NULL) ")
+            media = "i.kind='file' AND i.blob IS NOT NULL AND (i.mime LIKE 'image/%' OR i.mime LIKE 'video/%')"
+            undated = c.execute(live + f"SELECT i.* FROM items i JOIN live ON live.id=i.id WHERE {media} AND i.taken IS NULL LIMIT 2000", (user_id,)).fetchall()
+        if undated:
+            fixes = []
+            for r in undated:
+                t = read_exif(self.blob_path(r["blob"]))[0] if r["mime"] == "image/jpeg" else None
+                fixes.append((t or r["created"], r["id"]))
+            with self.write_lock, closing(self.conn()) as c, c:
+                c.executemany("UPDATE items SET taken=? WHERE id=? AND taken IS NULL", fixes)
+        args = [user_id]
+        after = ""
+        if before is not None:
+            after = " AND (i.taken < ? OR (i.taken = ? AND i.id < ?))"
+            args += [float(before), float(before), int(before_id or 2 ** 62)]
+        with closing(self.conn()) as c:
+            rows = c.execute(live + f"SELECT i.* FROM items i JOIN live ON live.id=i.id WHERE {media}{after} ORDER BY i.taken DESC, i.id DESC LIMIT ?",
+                             (*args, limit + 1)).fetchall()
+            more = len(rows) > limit
+            return {"items": self.describe(c, user_id, rows[:limit]), "more": more}
 
     # -- changes
     def unique_name(self, c, owner_id, parent_id, name, exclude=None):
@@ -513,7 +665,7 @@ class Store:
     def blob_path(self, blob):
         return self.blobs / blob[:2] / blob
 
-    def start_upload(self, user_id, parent_id, name, size, mime=None):
+    def start_upload(self, user_id, parent_id, name, size, mime=None, modified=None):
         name = clean_name(name)
         if not isinstance(size, int) or isinstance(size, bool) or not 0 <= size <= MAX_FILE:
             raise ApiError(413, f"a file can be at most {MAX_FILE // GB} GB")
@@ -522,8 +674,8 @@ class Store:
             self.check_storage(owner, size, self._quota_of(c, owner), c)
             upload_id = secrets.token_hex(16)
             (self.tmp / upload_id).write_bytes(b"")
-            c.execute("INSERT INTO uploads(id, user_id, owner_id, parent_id, name, size, mime, created) VALUES(?,?,?,?,?,?,?,?)",
-                      (upload_id, user_id, owner, parent_id, name, size, mime, time.time()))
+            c.execute("INSERT INTO uploads(id, user_id, owner_id, parent_id, name, size, mime, created, modified) VALUES(?,?,?,?,?,?,?,?,?)",
+                      (upload_id, user_id, owner, parent_id, name, size, mime, time.time(), plausible_time(modified)))
         return {"id": upload_id, "chunk": CHUNK, "received": 0}
 
     def _upload(self, c, user_id, upload_id):
@@ -565,6 +717,10 @@ class Store:
             for block in iter(lambda: fh.read(1024 * 1024), b""):
                 digest.update(block)
         blob = secrets.token_hex(16)
+        mime = guess_mime(row["name"])
+        taken = None
+        if mime.startswith(("image/", "video/")):
+            taken = (read_exif(path)[0] if mime == "image/jpeg" else None) or row["modified"]
         with self.write_lock, closing(self.conn()) as c, c:
             owner, parent = self.writable_parent(c, user_id, row["parent_id"])
             name = self.unique_name(c, owner, row["parent_id"], row["name"])
@@ -572,8 +728,9 @@ class Store:
             dest.parent.mkdir(exist_ok=True)
             shutil.move(str(path), str(dest))
             now = time.time()
-            new = c.execute("INSERT INTO items(owner_id, parent_id, name, kind, size, mime, blob, sha256, created, modified) VALUES(?,?,?,'file',?,?,?,?,?,?)",
-                            (owner, row["parent_id"], name, row["size"], guess_mime(name), blob, digest.hexdigest(), now, now)).lastrowid
+            new = c.execute("INSERT INTO items(owner_id, parent_id, name, kind, size, mime, blob, sha256, created, modified, taken) VALUES(?,?,?,'file',?,?,?,?,?,?,?)",
+                            (owner, row["parent_id"], name, row["size"], guess_mime(name), blob, digest.hexdigest(), now, now,
+                             (taken or now) if mime.startswith(("image/", "video/")) else None)).lastrowid
             c.execute("DELETE FROM uploads WHERE id=?", (upload_id,))
             return self.describe(c, user_id, [self.get(c, new)])[0]
 
@@ -612,13 +769,20 @@ class Store:
         info = self.file_for_read(user_id, item_id)
         if info["mime"] not in THUMBABLE or not shutil.which("ffmpeg"):
             raise ApiError(404, "no thumbnail")
-        out = self.thumbs / f"{info['blob']}.jpg"
+        out = self.thumbs / f"{info['blob']}.s360.jpg"
         if not out.exists():
             tmp = out.with_suffix(f".{secrets.token_hex(4)}.tmp.jpg")
             seek = ["-ss", "0.5"] if info["mime"].startswith("video/") else []
+            # the short side 360 px (a square tile in the Photos view stays sharp on a phone), and a JPEG turned the way its EXIF says
+            vf = "scale='if(gt(iw,ih),-2,min(360,iw))':'if(gt(iw,ih),min(360,ih),-2)'"
+            # (ffmpeg 8 turns a JPEG by itself, older ones do not: -noautorotate and the turn here give the same result with either)
+            turn = {2: "hflip", 3: "hflip,vflip", 4: "vflip", 5: "transpose=0", 6: "transpose=1", 7: "transpose=3", 8: "transpose=2"}.get(
+                read_exif(info["path"])[1] if info["mime"] == "image/jpeg" else 1)
+            if info["mime"] == "image/jpeg":
+                seek = ["-noautorotate"]
             with self.thumb_slots:        # at most WORKERS ffmpeg processes at once, at low priority
                 cmd = ["nice", "-n", "10", "ffmpeg", "-nostdin", "-v", "error", *seek, "-i", str(info["path"]), "-frames:v", "1",
-                       "-vf", "scale='min(320,iw)':-2", "-y", str(tmp)]
+                       "-vf", (turn + "," + vf) if turn else vf, "-y", str(tmp)]
                 try:
                     done = subprocess.run(cmd if shutil.which("nice") else cmd[3:], capture_output=True, timeout=60)
                 except (OSError, subprocess.SubprocessError):
@@ -660,6 +824,7 @@ class Handler(BaseHTTPRequestHandler):
     limiter = None
     static_dir = HERE / "static"
     secure_cookie = False
+    sso = None                 # sso_mod.Sso when Downloader Web accounts may sign in
     server_version = "FamilyCloud"
 
     def log_message(self, fmt, *args):
@@ -676,8 +841,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def fail(self, status, message, **extra):
-        self.send_json({"error": message, **extra}, status)
+    def fail(self, status, error, **extra):
+        self.send_json({"error": error, **extra}, status)
 
     def token(self):
         jar = SimpleCookie(self.headers.get("Cookie", ""))
@@ -700,18 +865,48 @@ class Handler(BaseHTTPRequestHandler):
 
     def cookie_header(self, value, max_age):
         parts = [f"{COOKIE}={value}", "Path=/", "HttpOnly", "SameSite=Strict", f"Max-Age={max_age}"]
-        if self.secure_cookie or self.headers.get("X-Forwarded-Proto") == "https":
+        if self.secure_cookie or sso_mod.effective_https(self.headers, self.client_address[0]):
             parts.append("Secure")
         return ("Set-Cookie", "; ".join(parts))
 
     def same_origin(self):
         origin = self.headers.get("Origin")
-        return not origin or urlparse(origin).netloc == self.headers.get("Host", "")
+        return not origin or urlparse(origin).netloc.lower() == sso_mod.effective_host(self.headers, self.client_address[0])
+
+    def dlw_token(self):
+        return sso_mod.cookie_value(self.headers.get("Cookie", ""), sso_mod.DW_COOKIE)
+
+    def current_user(self):
+        """This app's own session first; else a Downloader Web session (single sign-on)."""
+        user = self.store.session_user(self.token())
+        if user or self.sso is None:
+            return user
+        who = self.sso.whoami(self.dlw_token())
+        if who and not sso_mod.allows(who, "cloud"):
+            return None                                     # the account was not given this app: user_or_401 answers 403 not_member
+        return self.store.sso_user(who) if who else None
+
+    def dlw_cookie_header(self, value, max_age):
+        parts = [f"{sso_mod.DW_COOKIE}={value}", "Path=/", "HttpOnly", "SameSite=Lax", f"Max-Age={max_age}"]
+        if self.secure_cookie or sso_mod.effective_https(self.headers, self.client_address[0]):
+            parts.append("Secure")
+        return ("Set-Cookie", "; ".join(parts))
+
+    def refused_account(self):
+        """A signed-in family account that was not given this app (the admin chooses on the People page of fMily Home), else None."""
+        if self.sso is None:
+            return None
+        who = self.sso.whoami(self.dlw_token())
+        return who if who and not sso_mod.allows(who, "cloud") else None
 
     def user_or_401(self):
-        user = self.store.session_user(self.token())
+        user = self.current_user()
         if not user:
-            self.fail(401, "not signed in")
+            who = self.refused_account()
+            if who:                       # signed in, but not given this app: the same answer as Forms, Mail, Photos and Writer
+                self.fail(403, "not_member", message="Your account does not include fMily Cloud. Ask the family admin to tick it for you under People.", email=who["email"])
+            else:
+                self.fail(401, "not signed in")
         return user
 
     @staticmethod
@@ -736,7 +931,12 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         if not url.path.startswith("/api/"):
             return self.fail(404, "not found")
-        if self.headers.get(CSRF_HEADER[0]) != CSRF_HEADER[1] or "application/json" not in self.headers.get("Content-Type", "") or not self.same_origin():
+        if self.headers.get(CSRF_HEADER[0]) != CSRF_HEADER[1] or not self.same_origin():
+            return self.fail(403, "forbidden")
+        ctype = self.headers.get("Content-Type", "")
+        if not ctype:
+            return self.fail(415, "send Content-Type: application/json (body {} if empty)")
+        if "application/json" not in ctype:
             return self.fail(403, "forbidden")
         self.guarded(lambda: self.api_post(url.path, self.json_body()))
 
@@ -773,6 +973,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/me":
             return self.send_json(s.me(user))
         if path == "/api/users":
+            if self.sso is not None:
+                s.ensure_sso_users(self.sso.directory(self.dlw_token()))          # everybody in the family, not only who has already opened Cloud
             return self.send_json([{"id": u["id"], "display_name": u["display_name"]} for u in s.list_users() if u["id"] != user["id"]])
         if path == "/api/folder":
             return self.send_json(s.folder(user["id"], self.opt_int(q.get("id"))))
@@ -782,6 +984,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(s.trash_list(user["id"]))
         if path == "/api/search":
             return self.send_json(s.search(user["id"], q.get("q")))
+        if path == "/api/photos":
+            try:
+                before = float(q["before"]) if q.get("before") else None
+                before_id = int(q["before_id"]) if q.get("before_id") else None
+            except ValueError:
+                return self.fail(400, "before must be a number")
+            return self.send_json(s.photos(user["id"], before, before_id))
         if path == "/api/shares":
             return self.send_json(s.shares_of(user["id"], int(q.get("id", 0))))
         m = re.fullmatch(r"/api/upload/([0-9a-f]{32})", path)
@@ -796,13 +1005,18 @@ class Handler(BaseHTTPRequestHandler):
     def api_post(self, path, body):
         if path == "/api/login":
             return self.login(body)
+        if path == "/api/logout":                       # before the sign-in check: a person who was not given this app can still sign out
+            if self.token():
+                self.store.end_session(self.token())
+            headers = [self.cookie_header("", 0)]
+            if self.sso is not None and self.dlw_token():
+                self.sso.logout(self.dlw_token())       # one sign-out for every family app
+                headers.append(self.dlw_cookie_header("", 0))
+            return self.send_json({"ok": True}, headers=headers)
         user = self.user_or_401()
         if not user:
             return
         s, uid = self.store, user["id"]
-        if path == "/api/logout":
-            s.end_session(self.token())
-            return self.send_json({"ok": True}, headers=[self.cookie_header("", 0)])
         if path == "/api/folder":
             return self.send_json(s.create_folder(uid, self.opt_int(body.get("parent")), body.get("name")), 201)
         if path == "/api/rename":
@@ -820,7 +1034,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/share":
             return self.send_json(s.share(uid, int(body.get("id", 0)), int(body.get("user", 0)), body.get("role")))
         if path == "/api/upload/start":
-            return self.send_json(s.start_upload(uid, self.opt_int(body.get("parent")), body.get("name"), body.get("size"), body.get("mime")), 201)
+            return self.send_json(s.start_upload(uid, self.opt_int(body.get("parent")), body.get("name"), body.get("size"), body.get("mime"), body.get("modified")), 201)
         m = re.fullmatch(r"/api/upload/([0-9a-f]{32})/(finish|cancel)", path)
         if m:
             return self.send_json(s.finish_upload(uid, m.group(1)) if m.group(2) == "finish" else s.cancel_upload(uid, m.group(1)))
@@ -848,6 +1062,21 @@ class Handler(BaseHTTPRequestHandler):
         key = f"{self.client_address[0]}|{username}"
         if self.limiter.blocked(key):
             return self.fail(429, "too many attempts; wait a few minutes")
+        if self.sso is not None and "@" in username:
+            # the family login (a Downloader Web account). Never from the public internet: Funnel visitors use a local account.
+            if sso_mod.is_funnel(self.headers):
+                return self.fail(403, "sign in with your local username here")
+            token, age = self.sso.login(username, str(body.get("password", "")))
+            who = self.sso.whoami(token) if token else None
+            if not who:
+                self.limiter.fail(key)
+                return self.fail(401, "wrong e-mail or password")
+            self.limiter.clear(key)
+            user = self.store.sso_user(who)
+            if not user:
+                return self.fail(403, "this account is disabled here")
+            return self.send_json({"id": user["id"], "username": user["username"], "display_name": user["display_name"]},
+                                  headers=[self.dlw_cookie_header(token, age)])
         row = self.store.login(username, str(body.get("password", "")))
         if not row:
             self.limiter.fail(key)
@@ -918,17 +1147,20 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; frame-src 'self'; connect-src 'self'")
+        self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; frame-src 'self'; connect-src 'self'; " + frame_ancestors(sso_mod.effective_host(self.headers, self.client_address[0])))
         self.end_headers()
         self.wfile.write(raw)
 
 
-def make_server(host, port, data_dir, secure_cookie=False, static_dir=None, require_mount=None):
+def make_server(host, port, data_dir, secure_cookie=False, static_dir=None, require_mount=None, sso_upstream=None, dw_users=None, dw_files=None):
     handler = type("BoundHandler", (Handler,), {
-        "store": Store(data_dir, require_mount), "limiter": LoginLimiter(), "secure_cookie": secure_cookie,
+        "store": Store(data_dir, require_mount), "limiter": LoginLimiter(), "secure_cookie": secure_cookie, "sso": sso_mod.Sso(sso_upstream) if sso_upstream else None,
         "static_dir": Path(static_dir) if static_dir else HERE / "static"})
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
+    if dw_users and dw_files:                       # what a person's Downloader and Uploader made shows in their own Cloud (see downloads.py)
+        import downloads
+        downloads.start(handler.store, Path(dw_users), Path(dw_files))
     return httpd
 
 
@@ -944,13 +1176,16 @@ def prompt_password(args):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Family Cloud server")
+    ap = argparse.ArgumentParser(description="fMily Cloud server")
     ap.add_argument("--data-dir", default=str(DEFAULT_DATA), help="where files and the database live (default %(default)s)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("serve")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8778)
+    s.add_argument("--sso", default="", metavar="URL", help="Downloader Web address (e.g. http://127.0.0.1:8766): its accounts sign in here too, one login for every family app")
     s.add_argument("--secure-cookie", action="store_true", help="mark the session cookie Secure (use behind HTTPS)")
+    s.add_argument("--dw-users", default="", metavar="FILE", help="Downloader Web's users.json: with --dw-files, each person's Downloader/Uploader files appear in their own Cloud, in a folder called Downloads")
+    s.add_argument("--dw-files", default="", metavar="DIR", help="Downloader Web's user folders (default there: ~/DownloaderUsers)")
     s.add_argument("--require-mount", default="", help="refuse uploads unless this directory is a mount point (the big drive)")
     a = sub.add_parser("add-user")
     a.add_argument("username")
@@ -960,6 +1195,9 @@ def main(argv=None):
     r = sub.add_parser("reset-password")
     r.add_argument("username")
     r.add_argument("--password-stdin", action="store_true")
+    k = sub.add_parser("link-user", help="make an existing user the owner of a Downloader Web e-mail address (single sign-on)")
+    k.add_argument("username")
+    k.add_argument("email")
     d = sub.add_parser("disable-user")
     d.add_argument("username")
     q = sub.add_parser("set-quota")
@@ -969,8 +1207,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         if args.cmd == "serve":
-            httpd = make_server(args.host, args.port, args.data_dir, args.secure_cookie, require_mount=args.require_mount or None)
-            print(f"Family Cloud on http://{args.host}:{args.port}/  (data {args.data_dir}"
+            httpd = make_server(args.host, args.port, args.data_dir, args.secure_cookie, require_mount=args.require_mount or None, sso_upstream=args.sso or None, dw_users=args.dw_users or None, dw_files=args.dw_files or None)
+            print(f"fMily Cloud on http://{args.host}:{args.port}/  (data {args.data_dir}"
                   f"{', needs ' + args.require_mount + ' mounted' if args.require_mount else ''})", file=sys.stderr)
             try:
                 httpd.serve_forever()
@@ -984,6 +1222,9 @@ def main(argv=None):
         elif args.cmd == "reset-password":
             store.set_password(args.username.strip().lower(), prompt_password(args))
             print("password changed; the user's sessions were ended")
+        elif args.cmd == "link-user":
+            store.link_sso(args.username.strip().lower(), args.email)
+            print(f"{args.username} is now the family login of {args.email.strip().lower()}")
         elif args.cmd == "disable-user":
             store.disable_user(args.username.strip().lower())
             print("disabled; the user's sessions were ended")

@@ -1,5 +1,5 @@
 "use strict";
-// Family Cloud web app. File and folder names from other people are put on the page with textContent or
+// fMily Cloud web app. File and folder names from other people are put on the page with textContent or
 // append(string), never as HTML.
 const $ = (id) => document.getElementById(id);
 const state = { me: null, tab: "files", folder: null, path: [], role: "owner", items: [], rootView: true };
@@ -28,6 +28,7 @@ async function api(path, body) {
   let data = null;
   try { data = await res.json(); } catch (e) { /* no body */ }
   if (res.status === 401 && path !== "/api/login") { showLogin(); throw new Error("Signed out"); }
+  if (res.status === 403 && data && data.error === "not_member") { showNoAccess(data); throw new Error("not_member"); }
   if (!res.ok) { const err = new Error((data && data.error) || "Request failed (" + res.status + ")"); err.status = res.status; err.data = data; throw err; }
   return data;
 }
@@ -53,6 +54,20 @@ function toast(text) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---- sign in / out -------------------------------------------------------------------------
+
+// A signed-in person who was not given this app (the admin chooses under People): the family's message and a way to sign out, never a login form (the same words as Forms, Mail, Photos and Writer).
+function showNoAccess(data) {
+  state.me = null;
+  state.noAccess = true;
+  $("app").hidden = true;
+  const box = $("login");
+  box.hidden = false;
+  const h = document.createElement("h1"); h.textContent = "fMily Cloud is private";
+  const p = document.createElement("p"); p.textContent = data.message || "";
+  const b = document.createElement("button"); b.type = "button"; b.textContent = "Sign out";
+  b.addEventListener("click", async () => { try { await api("/api/logout", {}); } catch (e) { /* signed out anyway */ } location.reload(); });
+  box.replaceChildren(h, p, b);
+}
 
 function showLogin() {
   state.me = null;
@@ -99,6 +114,8 @@ async function load() {
   try {
     if (q) {
       Object.assign(state, { items: await api("/api/search?q=" + encodeURIComponent(q)), path: [], role: "view", rootView: false });
+    } else if (state.tab === "photos") {
+      return loadPhotos(true);
     } else if (state.tab === "trash") {
       Object.assign(state, { items: await api("/api/trash"), path: [], role: "none", rootView: true });
     } else if (state.tab === "shared" && state.folder === null) {
@@ -134,6 +151,7 @@ function render() {
   const canWrite = !q && state.tab !== "trash" && (state.role === "owner" || state.role === "edit") && !(state.tab === "shared" && state.folder === null);
   $("new-folder").hidden = $("upload").hidden = !canWrite;
   $("empty-trash").hidden = !(state.tab === "trash" && !q && state.items.length);
+  $("photos").hidden = true; $("list").hidden = false; $("upload-photos").hidden = true;
   const rows = state.items.map(row);
   $("list").replaceChildren(...rows);
   const empty = $("empty");
@@ -176,8 +194,16 @@ $("search").addEventListener("input", () => { clearTimeout(searchTimer); searchT
 
 // ---- viewer --------------------------------------------------------------------------------
 
-function viewer(item) {
+const framed = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+// Inside fMily Play, sound and video play in Play's own player (Explorer holds the same file under the key c:<id as 12 hex digits>).
+let viewList = null, viewIndex = -1;          // the photos the viewer steps through (Photos view), or null for one file
+function viewer(item, list, index) {
+  viewList = list || null; viewIndex = list ? index : -1;
   const src = "/api/file/" + item.id;
+  if (framed && /^(audio|video)\//.test(item.mime) && Number.isInteger(+item.id)) {
+    // sound plays in fMily's bar and Cloud stays in front; a video opens in Play, where its picture is
+    try { window.parent.postMessage({ fmily: "play", key: "c:" + (+item.id).toString(16).padStart(12, "0"), stay: item.mime.startsWith("audio/") }, "*"); return; } catch (e) { /* no parent: fall through to the built-in viewer */ }
+  }
   let body;
   if (item.mime.startsWith("image/")) body = el("img", { src, alt: item.name });
   else if (item.mime.startsWith("video/")) body = el("video", { src, controls: true, autoplay: true, playsinline: true });
@@ -187,9 +213,44 @@ function viewer(item) {
   $("viewer-download").setAttribute("href", src + "?download=1");
   $("viewer-download").setAttribute("download", item.name);
   $("viewer-body").replaceChildren(body);
+  $("viewer-prev").hidden = !(viewList && viewIndex > 0);
+  $("viewer-next").hidden = !(viewList && (viewIndex < viewList.length - 1 || photos.more));
+  $("viewer-trash").hidden = !(viewList && item.role === "owner");
   $("viewer").hidden = false;
 }
-function closeViewer() { $("viewer").hidden = true; $("viewer-body").replaceChildren(); }   // removing the element stops playback
+function closeViewer() { $("viewer").hidden = true; $("viewer-body").replaceChildren(); viewList = null; }   // removing the element stops playback
+async function step(d) {
+  if (!viewList || $("viewer").hidden) return;
+  let i = viewIndex + d;
+  if (i >= viewList.length && photos.more) { await loadPhotos(false); viewList = photos.items; }
+  if (i < 0 || i >= viewList.length) return;
+  viewer(viewList[i], viewList, i);
+}
+$("viewer-prev").addEventListener("click", () => step(-1));
+$("viewer-next").addEventListener("click", () => step(1));
+document.addEventListener("keydown", (e) => { if (e.key === "ArrowLeft") step(-1); else if (e.key === "ArrowRight") step(1); });
+(() => {        // swipe left or right on a photo
+  let x0 = null, y0 = 0;
+  $("viewer-body").addEventListener("touchstart", (e) => { if (e.touches.length === 1) { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; } }, { passive: true });
+  $("viewer-body").addEventListener("touchend", (e) => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0;
+    x0 = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
+  }, { passive: true });
+})();
+$("viewer-trash").addEventListener("click", async () => {
+  if (!viewList) return;
+  const item = viewList[viewIndex];
+  try { await api("/api/trash", { id: item.id }); } catch (e) { toast(e.message); return; }
+  toast("Moved to the trash.");
+  photos.items.splice(photos.items.indexOf(item), 1);
+  paintPhotos();
+  refreshMe();
+  if (!photos.items.length) return closeViewer();
+  const i = Math.min(viewIndex, photos.items.length - 1);
+  viewer(photos.items[i], photos.items, i);
+});
 $("viewer-close").addEventListener("click", closeViewer);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeViewer(); closeSheet(); } });
 
@@ -270,7 +331,7 @@ async function shareSheet(item) {
     });
     return el("div", { class: "person" }, el("span", { class: "spacer" }, p.display_name), select);
   });
-  openSheet("Share “" + item.name + "”", el("p", {}, item.kind === "folder" ? "Everything inside is shared too. Editors can add, rename and delete files; viewers can only look and download." : "The person can open and download this file."),
+  openSheet("Share “" + item.name + "”", el("p", {}, item.kind === "folder" ? "Everything inside is shared too. People who can edit may add, rename and delete files; people who can view can only look and download." : "The person can open and download this file."),
     rows.length ? rows : el("p", {}, "There is nobody else on this server yet."), el("div", { class: "row" }, el("button", { type: "button", onclick: closeSheet }, "Done")));
 }
 
@@ -278,6 +339,76 @@ $("new-folder").addEventListener("click", () => nameSheet("New folder", "", "Cre
 $("empty-trash").addEventListener("click", async () => {
   if (!confirm("Delete everything in the trash forever?")) return;
   try { await api("/api/trash/empty", {}); await load(); refreshMe(); } catch (e) { toast(e.message); }
+});
+
+// ---- Photos: every photo and video in My files, newest first, in square tiles side by side, a heading per day ---------------
+
+const photos = { items: [], more: false, loading: false };
+const takenOf = (it) => it.taken || it.created;
+function dayLabel(ts) {
+  const d = new Date(ts * 1000), today = new Date();
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const days = Math.round((start(today) - start(d)) / 86400000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}) });
+}
+async function loadPhotos(fresh) {
+  if (photos.loading) return;
+  if (!fresh && !photos.more) return;
+  photos.loading = true;
+  try {
+    let url = "/api/photos";
+    const last = photos.items[photos.items.length - 1];
+    if (!fresh && last) url += "?before=" + takenOf(last) + "&before_id=" + last.id;
+    const r = await api(url);
+    photos.items = fresh ? r.items : photos.items.concat(r.items);
+    photos.more = r.more;
+  } catch (err) { toast(err.message); return; }
+  finally { photos.loading = false; }
+  paintPhotos();
+}
+function paintPhotos() {
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === "photos"));
+  $("crumbs").replaceChildren(el("span", { class: "now" }, "Photos"));
+  $("new-folder").hidden = $("upload").hidden = $("empty-trash").hidden = true;
+  $("upload-photos").hidden = false;
+  $("list").hidden = true;
+  const box = $("photos");
+  box.hidden = false;
+  const out = [];
+  let label = null, grid = null;
+  photos.items.forEach((it, i) => {
+    const l = dayLabel(takenOf(it));
+    if (l !== label) { label = l; out.push(el("h3", { class: "day" }, l)); grid = el("div", { class: "pgrid" }); out.push(grid); }
+    const video = (it.mime || "").startsWith("video/");
+    const tile = el("button", { type: "button", class: "ptile" + (video ? " video" : ""), "aria-label": (video ? "Video " : "Photo ") + it.name },
+      it.thumb ? el("img", { src: "/api/thumb/" + it.id, alt: "", loading: "lazy", decoding: "async" }) : el("span", { class: "noimg" }, (it.name.split(".").pop() || "").toUpperCase()));
+    tile.addEventListener("click", () => viewer(it, photos.items, i));
+    grid.append(tile);
+  });
+  box.replaceChildren(...out);
+  const empty = $("empty");
+  empty.hidden = photos.items.length > 0;
+  empty.textContent = "No photos yet. Tap Upload photos to add some from this phone or computer: they go into your Photos folder.";
+}
+new IntersectionObserver((entries) => { if (entries[0].isIntersecting && state.tab === "photos") loadPhotos(false); }, { rootMargin: "800px" }).observe($("photos-more"));
+
+// the Photos folder at the top of My files (made the first time): where Upload photos puts them
+async function photosFolder() {
+  const root = await api("/api/folder");
+  const f = root.items.find((i) => i.kind === "folder" && i.name.toLowerCase() === "photos");
+  if (f) return f.id;
+  return (await api("/api/folder", { parent: null, name: "Photos" })).id;
+}
+$("upload-photos").addEventListener("click", () => $("photo-file").click());
+$("photo-file").addEventListener("change", async () => {
+  const files = [...$("photo-file").files];
+  $("photo-file").value = "";
+  if (!files.length) return;
+  let parent;
+  try { parent = await photosFolder(); } catch (e) { toast(e.message); return; }
+  enqueue(files, parent);
 });
 
 // ---- uploads: in chunks, one file at a time, retried and resumed if the connection drops ---------
@@ -295,14 +426,14 @@ $("uploads-close").addEventListener("click", () => {
   $("uploads").hidden = true;
 });
 
-function enqueue(files) {
+function enqueue(files, parentId) {
   if (!files.length) return;
   for (const file of files) {
     const bar = el("progress", { max: String(Math.max(1, file.size)), value: "0" });
     const status = el("span", { class: "meta" }, "Waiting");
     const cancel = el("button", { type: "button", class: "icon", onclick: () => { job.cancelled = true; if (job.state === "waiting") finishJob(job, "cancelled", "Cancelled"); } }, "Cancel");
     const li = el("li", {}, el("div", { class: "row" }, el("span", { class: "name" }, file.name), status, cancel), bar);
-    const job = { file, parent: state.folder, state: "waiting", cancelled: false, bar, status, li, cancel, id: null };
+    const job = { file, parent: parentId !== undefined ? parentId : state.folder, state: "waiting", cancelled: false, bar, status, li, cancel, id: null };
     jobs.push(job);
     $("upload-list").append(li);
   }
@@ -342,7 +473,7 @@ async function pump() {
 
 async function uploadOne(job) {
   const file = job.file;
-  const start = await api("/api/upload/start", { parent: job.parent, name: file.name, size: file.size, mime: file.type });
+  const start = await api("/api/upload/start", { parent: job.parent, name: file.name, size: file.size, mime: file.type, modified: file.lastModified ? file.lastModified / 1000 : null });
   job.id = start.id;
   let offset = 0, failures = 0;
   while (offset < file.size) {
@@ -372,13 +503,21 @@ async function uploadOne(job) {
 
 $("upload").addEventListener("click", () => $("file").click());
 $("file").addEventListener("change", () => { const files = [...$("file").files]; $("file").value = ""; enqueue(files); });
-document.addEventListener("dragover", (e) => { if (!$("new-folder").hidden) e.preventDefault(); });
-document.addEventListener("drop", (e) => {
-  if ($("new-folder").hidden || !e.dataTransfer || !e.dataTransfer.files.length) return;
+document.addEventListener("dragover", (e) => { if (!$("new-folder").hidden || state.tab === "photos") e.preventDefault(); });
+document.addEventListener("drop", async (e) => {
+  if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+  if (state.tab === "photos") {
+    e.preventDefault();
+    const files = [...e.dataTransfer.files].filter((f) => /^(image|video)\//.test(f.type));
+    if (!files.length) return toast("Only photos and videos go here.");
+    try { enqueue(files, await photosFolder()); } catch (err) { toast(err.message); }
+    return;
+  }
+  if ($("new-folder").hidden) return;
   e.preventDefault();
   enqueue([...e.dataTransfer.files]);
 });
 window.addEventListener("beforeunload", (e) => { if (jobs.some((j) => j.state === "running")) { e.preventDefault(); e.returnValue = ""; } });
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => { /* needs HTTPS or localhost */ });
-api("/api/me").then(start).catch(() => { if (!state.me) showLogin(); });
+api("/api/me").then(start).catch(() => { if (!state.me && !state.noAccess) showLogin(); });
